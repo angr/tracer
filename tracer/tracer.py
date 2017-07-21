@@ -782,6 +782,8 @@ class Tracer(object):
         with open(lname, 'rb') as f:
             trace = f.read()
 
+        os.remove(lname)
+
         addrs = [int(v.split('[')[1].split(']')[0], 16)
                  for v in trace.split('\n')
                  if v.startswith('Trace')]
@@ -803,8 +805,6 @@ class Tracer(object):
             assert len(self._magic_content) == 0x1000, a_mesg
 
             os.remove(mname)
-
-        os.remove(lname)
 
         return addrs
 
