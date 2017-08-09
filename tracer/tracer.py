@@ -5,13 +5,15 @@ import socket
 import claripy
 import tempfile
 import signal
-import subprocess
+import subprocess32
 import shellphish_qemu
 from .tracerpov import TracerPoV
 from .cachemanager import LocalCacheManager
 from .simprocedures import receive
 from .simprocedures import FixedOutTransmit, FixedInReceive, FixedRandom
 from angr import sim_options as so
+import resource
+import re
 
 import logging
 
@@ -51,7 +53,8 @@ class Tracer(object):
                  add_options=None, remove_options=None, trim_history=True,
                  project=None, dump_syscall=False, dump_cache=True,
                  max_size = None, exclude_sim_procedures_list=None,
-                 argv=None, keep_predecessors=1):
+                 argv=None, keep_predecessors=1,
+                 trace_log_limit=2**30, trace_timeout=5*60):
         """
         :param binary: path to the binary to be traced
         :param input: concrete input string to feed to binary
@@ -81,6 +84,10 @@ class Tracer(object):
             defaults to binary name with no params.
         :param keep_predecessors: Number of states before the final state we
             should preserve. Default 1, must be greater than 0
+        :param trace_log_limit: Optionally specify the dynamic trace log file
+            size limit in bytes, defaults to 1G.
+        :param trace_timeout: Optionally specify the dymamic time limit in seconds
+            defaults to 5 minutes.
         """
 
         self.binary = binary
@@ -93,6 +100,8 @@ class Tracer(object):
         self.input_max_size = max_size or len(input)
         self.exclude_sim_procedures_list = ["malloc","free","calloc","realloc"] if exclude_sim_procedures_list is None else exclude_sim_procedures_list
         self.argv = argv or [binary]
+        self.trace_log_limit = trace_log_limit
+        self.trace_timeout = trace_timeout
 
         for h in self._hooks:
             l.debug("Hooking %#x -> %s", h, self._hooks[h].display_name)
@@ -652,6 +661,11 @@ class Tracer(object):
         args += ["-d", "exec", "-D", lname]
         args += self.argv
 
+        def set_fsize():
+            # here we limit the logsize to be 1G
+            resource.setrlimit(resource.RLIMIT_FSIZE,
+                               (self.trace_log_limit , self.trace_log_limit))
+
         with open('/dev/null', 'wb') as devnull:
             stdout_f = devnull
             if stdout_file is not None:
@@ -660,13 +674,14 @@ class Tracer(object):
             # we assume qemu with always exit and won't block
             if self.pov_file is None:
                 l.info("tracing as raw input")
-                p = subprocess.Popen(
+                p = subprocess32.Popen(
                         args,
-                        stdin=subprocess.PIPE,
+                        stdin=subprocess32.PIPE,
                         stdout=stdout_f,
                         stderr=devnull,
+                        preexec_fn=set_fsize,
                         env=os.environ)
-                _, _ = p.communicate(self.input)
+                _, _ = p.communicate(self.input, timeout=self.trace_timeout)
             else:
                 l.info("tracing as pov file")
                 in_s, out_s = socket.socketpair()
@@ -675,11 +690,12 @@ class Tracer(object):
                         stdin=in_s,
                         stdout=stdout_f,
                         stderr=devnull,
+                        preexec_fn=set_fsize,
                         env=os.environ)
                 for write in self.pov_file.writes:
                     out_s.send(write)
                     time.sleep(.01)
-            ret = p.wait()
+            ret = p.wait(timeout=self.trace_timeout)
             # did a crash occur?
             if ret < 0:
                 if abs(ret) == signal.SIGSEGV or abs(ret) == signal.SIGILL:
@@ -696,9 +712,19 @@ class Tracer(object):
 
         os.remove(lname)
 
-        addrs = [int(v.split('[')[1].split(']')[0], 16)
-                 for v in trace.split('\n')
-                 if v.startswith('Trace')]
+        addrs = []
+        prog = re.compile(r'Trace (.*) \[(?P<addr>.*)\].*')
+        for t in trace.split('\n'):
+            m = prog.match(t)
+            if m != None:
+                addr_str = m.group('addr')
+                addrs.append(int(addr_str, base=16))
+            else:
+                if re.match(r'T.*', t):
+                    l.warning("""One trace is found to be malformated,
+                    it is possible that the log file size exceeds the 1G limit,
+                    meaning that there might be infinite loops in the target program
+                    %s"""%(t))
 
         # Find where qemu loaded the binary. Primarily for PIE
         self.qemu_base_addr = int(trace.split("start_code")[1].split("\n")[0],16)
