@@ -96,7 +96,7 @@ class Tracer(object):
         self.preconstrain_flag = preconstrain_flag
         self.simprocedures = {} if simprocedures is None else simprocedures
         self._hooks = {} if hooks is None else hooks
-        self.input_max_size = max_size or len(input)
+        self.input_max_size = max_size if input is None else len(input)
         self.exclude_sim_procedures_list = ["malloc","free","calloc","realloc"] if exclude_sim_procedures_list is None else exclude_sim_procedures_list
         self.argv = argv or [binary]
         self.trace_log_limit = trace_log_limit
@@ -345,7 +345,7 @@ class Tracer(object):
 
             self.prev_path_group = self.path_group
             self.path_group = self.path_group.step(size=bbl_max_bytes)
-        
+
             if self.crash_type == EXEC_STACK:
                 self.path_group = self.path_group.stash(from_stash='active',
                         to_stash='crashed')
