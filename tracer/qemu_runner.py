@@ -21,8 +21,7 @@ l = logging.getLogger("tracer.QEMURunner")
 try:
     import shellphish_qemu
 except ImportError:
-    l.error("Unable to import shellphish_qemu, which is required by QEMURunner. Please install it before proceeding.")
-    assert False
+    raise ImportError("Unable to import shellphish_qemu, which is required by QEMURunner. Please install it before proceeding.")
 
 multicb_available = True
 
