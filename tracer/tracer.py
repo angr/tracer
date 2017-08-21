@@ -1071,7 +1071,10 @@ class Tracer(object):
         p_block = state.project.factory.block(state.addr, backup_state=state)
         inst_cnt = len(p_block.instruction_addrs)
         insts = 0 if inst_cnt == 0 else inst_cnt - 1
+        p_block.pp()
+        print state
         succs = state.project.factory.successors(state, num_inst=insts).flat_successors
+        print succs
         if len(succs) > 0:
             if len(succs) > 1:
                 succs = [s for s in succs if s.se.satisfiable()]
@@ -1089,6 +1092,8 @@ class Tracer(object):
         state.inspect.remove_breakpoint("address_concretization", bp2)
 
         l.debug("final step...")
+        print state
         succs = state.project.factory.successors(state)
         successors = succs.flat_successors + succs.unconstrained_successors
+        print successors[0].ip
         return successors[0]

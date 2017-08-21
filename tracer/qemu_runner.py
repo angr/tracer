@@ -37,43 +37,26 @@ class QEMURunner(Runner):
     Trace an angr path with a concrete input using QEMU.
     """
 
-    def __init__(self, binary, input=None, pov_file=None, record_trace=False, record_stdout=False, record_magic=False,
-                 record_core=False, seed=None, memory_limit="8G", bitflip=False, report_bad_args=False, use_tiny_core=False,
-                 project=None, qemu=None):
+    def __init__(self, project=None, binary=None, input=None, pov_file=None, record_trace=True, record_stdout=False,
+                 record_magic=True, record_core=False, seed=None, memory_limit="8G", bitflip=False, report_bad_args=False,
+                 use_tiny_core=False, qemu=None, argv=None):
         """
+        :param project: the original project.
         :param binary: path to the binary to be traced.
         :param input: concrete input string to feed to binary.
         :param pov_file: CGC PoV describing the input to trace.
         :param record_trace: whether or not to record the basic block trace.
         :param record_stdout: whether ot not to record the output of tracing process.
+        :param record_magic: whether ot not to record the magic flag page as reported by QEMU.
         :param record_core: whether or not to record the core file in case of crash.
         :param report_bad_arg: enable CGC QEMU's report bad args option.
         :param use_tiny_core: Use minimal core loading.
-        :param project: the original project.
         :param qemu: path to QEMU to be forced used.
+        :param argv: optionally specify argv params (i,e,: ['./calc', 'parm1']).
+                     Defaults to binary name with no params.
         """
-
-        if isinstance(binary, basestring):
-            self.is_multicb = False
-            self.binaries = [binary]
-        elif isinstance(binary, (list, tuple)):
-            if not multicb_available:
-                raise ValueError("Multicb tracing is disabled")
-            self.is_multicb = True
-            self.binaries = binary
-        else:
-            raise ValueError("Expected list or string for binary, got {} instead".format(type(binary)))
-
-        Runner.__init__(self, input=input, record_trace=record_trace, record_core=record_core,
-                        use_tiny_core=use_tiny_core, trace_source_path=qemu)
-
-        # Internal project object, useful for getting architecture and platform infos.
-        if project is None:
-            self._p = angr.Project(self.binaries[0])
-        else:
-            self._p = project
-
-        self.os = self._p.loader.main_object.os
+        Runner.__init__(self, project=project, binary=binary, input=input, record_trace=record_trace,
+                        record_core=record_core, use_tiny_core=use_tiny_core, trace_source_path=qemu)
 
         self.pov_file = pov_file
         self._record_magic = record_magic and self.os == 'cgc'
@@ -81,9 +64,12 @@ class QEMURunner(Runner):
         if record_trace and self.is_multicb:
             l.warning("record_trace specified with multicb, no trace will be recorded")
 
+        if isinstance(seed, (int, long)):
+            seed = str(seed)
         self.seed = seed
         self.memory_limit = memory_limit
         self.bitflip = bitflip
+        self.argv = argv
 
         if self.bitflip and self.is_multicb:
             raise ValueError("Cannot perform bitflip with MultiCB")
@@ -91,10 +77,10 @@ class QEMURunner(Runner):
         self.report_bad_args = report_bad_args
 
         if self.pov_file is None and self.input is None:
-            raise ValueError("must specify input or pov_file")
+            raise ValueError("Must specify input or pov_file")
 
         if self.pov_file is not None and self.input is not None:
-            raise ValueError("cannot specify both a pov_file and an input")
+            raise ValueError("Cannot specify both a pov_file and an input")
 
         # validate seed
         if self.seed is not None:
@@ -103,49 +89,42 @@ class QEMURunner(Runner):
                 if iseed > 4294967295 or iseed < 0:
                     raise ValueError
             except ValueError:
-                raise ValueError(
-                    "the passed seed is either not an integer or is not between 0 and UINT_MAX"
-                    )
+                raise ValueError("The passed seed is either not an integer or is not between 0 and UINT_MAX")
 
         # a PoV was provided
         if self.pov_file is not None:
             self.pov_file = TracerPoV(self.pov_file)
             self.pov = True
-        else:
-            self.pov = False
 
         self.fakeforksrv_path = os.path.join(shellphish_afl.afl_dir('multi-cgc'), "run_via_fakeforksrv")
 
         self._setup()
 
-        l.debug("accumulating basic block trace...")
+        l.debug("Accumulating basic block trace...")
         l.debug("tracer qemu path: %s", self.trace_source_path)
 
-        # does the input cause a crash?
-        self.crash_mode = False
-        # if the input causes a crash, what address does it crash at?
-        self.crash_addr = None
-
         self.stdout = None
+
+        # We need this to keep symbolic traces following the same path
+        # as their dynamic counterpart
         self.magic = None
 
         if record_stdout:
             tmp = tempfile.mktemp(prefix="stdout_" + os.path.basename(binary))
             # will set crash_mode correctly
-            self._dynamic_trace(stdout_file=tmp)
+            self._run(stdout_file=tmp)
             with open(tmp, "rb") as f:
                 self.stdout = f.read()
             os.remove(tmp)
         else:
             # will set crash_mode correctly
-            self._dynamic_trace()
+            self._run()
 
 
 ### SETUP
 
     @staticmethod
     def _memory_limit_to_int(ms):
-
         if not isinstance(ms, str):
             raise ValueError("memory_limit must be a string such as \"8G\"")
 
@@ -156,7 +135,7 @@ class QEMURunner(Runner):
         elif ms.endswith('G'):
             return int(ms[:-1]) * 1024 * 1024 * 1024
 
-        raise ValueError("unrecognized size, should be 'k', 'M', or 'G'")
+        raise ValueError("Unrecognized size, should be 'k', 'M', or 'G'")
 
     def _setup(self):
         # check the binary
@@ -192,7 +171,6 @@ class QEMURunner(Runner):
         """
         Check the install location of QEMU.
         """
-
         if self.os == "cgc":
             suffix = "tracer" if self._record_trace else "base"
             self.trace_source = "shellphish-qemu-cgc-%s" % suffix
@@ -241,6 +219,8 @@ class QEMURunner(Runner):
             shutil.copy(binary_o, binary_r)
 
         self.binaries = binary_replacements
+        if self.argv is not None and not self.is_multicb:
+            self.argv = self.binaries + self.argv[1:]
         os.chdir(tmpdir)
         try:
             yield (tmpdir,binary_replacements)
@@ -251,8 +231,7 @@ class QEMURunner(Runner):
             resource.setrlimit(resource.RLIMIT_CORE, saved_limit)
             self.binaries = binaries_old
 
-    def _dynamic_trace(self, stdout_file=None):
-
+    def _run(self, stdout_file=None):
         with self._setup_env() as (tmpdir,binary_replacement_fname):
             # get the dynamic trace
             self._run_trace(stdout_file=stdout_file)
@@ -283,14 +262,12 @@ class QEMURunner(Runner):
                     self._load_core_values(core_file)
 
     def _run_trace(self, stdout_file=None):
-
-        if len(self.binaries) > 1:
+        if self.is_multicb:
             self._run_multicb_trace(stdout_file)
         else:
             self._run_singlecb_trace(stdout_file)
 
     def _run_multicb_trace(self, stdout_file=None):
-
         args = [self.fakeforksrv_path]
         args += self.binaries
 
@@ -327,10 +304,6 @@ class QEMURunner(Runner):
                     self.crash_mode = bool(int(line.split(":")[-1]))
 
     def _run_singlecb_trace(self, stdout_file=None):
-        """
-        Accumulate a basic block trace using QEMU.
-        """
-
         logname = tempfile.mktemp(dir="/dev/shm/", prefix="tracer-log-")
         args = [self.trace_source_path]
 
@@ -338,7 +311,7 @@ class QEMURunner(Runner):
             args.append("-seed")
             args.append(str(self.seed))
 
-        # If the binary is CGC we'll also take this oppurtunity to read in the
+        # If the binary is CGC we'll also take this opportunity to read in the
         # magic page.
         if self._record_magic:
             mname = tempfile.mktemp(dir="/dev/shm/", prefix="tracer-magic-")
@@ -354,7 +327,8 @@ class QEMURunner(Runner):
 
         args += ["-m", self.memory_limit]
 
-        args += [self.binaries[0]]
+        args += self.argv or [self.binaries[0]]
+        
         if self.bitflip:
             args = [args[0]] + ["-bitflip"] + args[1:]
 
@@ -365,12 +339,12 @@ class QEMURunner(Runner):
 
             # we assume qemu with always exit and won't block
             if self.pov_file is None:
-                l.debug("tracing as raw input")
+                l.debug("Tracing as raw input")
                 l.debug(" ".join(args))
                 p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=stdout_f, stderr=devnull)
                 _, _ = p.communicate(self.input)
             else:
-                l.debug("tracing as pov file")
+                l.debug("Tracing as pov file")
                 in_s, out_s = socket.socketpair()
                 p = subprocess.Popen(args, stdin=in_s, stdout=stdout_f, stderr=devnull)
 
@@ -383,9 +357,9 @@ class QEMURunner(Runner):
             # did a crash occur?
             if ret < 0:
                 if abs(ret) == signal.SIGSEGV or abs(ret) == signal.SIGILL:
-                    l.info("input caused a crash (signal %d) during dynamic tracing", abs(ret))
+                    l.info("Input caused a crash (signal %d) during dynamic tracing", abs(ret))
                     l.debug(repr(self.input))
-                    l.debug("entering crash mode")
+                    l.debug("Entering crash mode")
                     self.crash_mode = True
 
             if stdout_file is not None:
@@ -398,7 +372,7 @@ class QEMURunner(Runner):
                      if v.startswith('Trace')]
 
             # Find where qemu loaded the binary. Primarily for PIE
-            self.qemu_base_addr = int(trace.split("start_code")[1].split("\n")[0],16)
+            self.base_addr = int(trace.split("start_code")[1].split("\n")[0],16)
 
             # grab the faulting address
             if self.crash_mode:
@@ -406,11 +380,11 @@ class QEMURunner(Runner):
 
             os.remove(logname)
             self.trace = addrs
-            l.debug("trace consists of %d basic blocks", len(self.trace))
+            l.debug("Trace consists of %d basic blocks", len(self.trace))
 
         if self._record_magic:
             self.magic = open(mname).read()
-            a_mesg = "magic content read from QEMU improper size, should be a page in length"
+            a_mesg = "Magic content read from QEMU improper size, should be a page in length"
             assert len(self.magic) == 0x1000, a_mesg
             os.remove(mname)
 
