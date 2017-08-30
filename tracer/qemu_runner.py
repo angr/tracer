@@ -10,7 +10,6 @@ import tempfile
 import subprocess
 import contextlib
 
-from elftools.elf.descriptions import _DESCR_EI_OSABI
 from .tracerpov import TracerPoV
 from .tracer import TracerEnvironmentError
 from .tinycore import TinyCore
@@ -156,9 +155,7 @@ class QEMURunner(Runner):
                 raise TracerEnvironmentError(error_msg)
 
         # hack for the OS
-        supported_oses = ["cgc", "unix"] + _DESCR_EI_OSABI.values() 
-
-        if self._os not in supported_oses:
+        if self._os != 'cgc' and not self._os.startswith("UNIX"):
             error_msg = "\"%s\" runs on an OS not supported by the runner (only cgc and elf at the moment)" % self._binaries[0]
             l.error(error_msg)
             raise TracerEnvironmentError(error_msg)
