@@ -25,25 +25,25 @@ class Runner(object):
         if project is None and binary is None:
             raise ValueError("Must specify project or binary.")
 
-        self.is_multicb = False
+        self._is_multicb = False
 
         if project is None:
             if isinstance(binary, basestring):
-                self.binaries = [binary]
+                self._binaries = [binary]
             elif isinstance(binary, (list, tuple)):
                 if not multicb_available:
                     raise ValueError("Multicb tracing is disabled")
-                self.is_multicb = True
-                self.binaries = binary
+                self._is_multicb = True
+                self._binaries = binary
             else:
                 raise ValueError("Expected list or string for binary, got {} instead".format(type(binary)))
-            self._p = angr.Project(self.binaries[0])
+            self._p = angr.Project(self._binaries[0])
         else:
             self._p = project
-            self.binaries = [project.filename]
+            self._binaries = [project.filename]
 
         # Hack for architecture and OS.
-        self.os = self._p.loader.main_object.os
+        self._os = self._p.loader.main_object.os
         self.base_addr = self._p.loader.main_object.min_addr
 
         self.input = input
@@ -58,13 +58,13 @@ class Runner(object):
         self.reg_vals = None
         self._state = None
         self.memory = None
-        self.use_tiny_core = use_tiny_core
+        self._use_tiny_core = use_tiny_core
 
         # Is a PoV provided?
         self.pov = False
 
         self.trace_source = None
-        self.trace_source_path = trace_source_path
+        self._trace_source_path = trace_source_path
 
         # Does the input cause a crash?
         self.crash_mode = False

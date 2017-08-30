@@ -10,7 +10,7 @@ import tempfile
 import subprocess
 import contextlib
 
-from elftools.elf.enums import ENUM_EI_OSABI
+from elftools.elf.descriptions import _DESCR_EI_OSABI
 from .tracerpov import TracerPoV
 from .tracer import TracerEnvironmentError
 from .tinycore import TinyCore
@@ -58,22 +58,22 @@ class QEMURunner(Runner):
                         record_core=record_core, use_tiny_core=use_tiny_core, trace_source_path=qemu)
 
         self.pov_file = pov_file
-        self._record_magic = record_magic and self.os == 'cgc'
+        self._record_magic = record_magic and self._os == 'cgc'
 
-        if record_trace and self.is_multicb:
+        if record_trace and self._is_multicb:
             l.warning("record_trace specified with multicb, no trace will be recorded")
 
         if isinstance(seed, (int, long)):
             seed = str(seed)
-        self.seed = seed
-        self.memory_limit = memory_limit
-        self.bitflip = bitflip
+        self._seed = seed
+        self._memory_limit = memory_limit
+        self._bitflip = bitflip
         self.argv = argv
 
-        if self.bitflip and self.is_multicb:
+        if self._bitflip and self._is_multicb:
             raise ValueError("Cannot perform bitflip with MultiCB")
 
-        self.report_bad_args = report_bad_args
+        self._report_bad_args = report_bad_args
 
         if self.pov_file is None and self.input is None:
             raise ValueError("Must specify input or pov_file")
@@ -82,9 +82,9 @@ class QEMURunner(Runner):
             raise ValueError("Cannot specify both a pov_file and an input")
 
         # validate seed
-        if self.seed is not None:
+        if self._seed is not None:
             try:
-                iseed = int(self.seed)
+                iseed = int(self._seed)
                 if iseed > 4294967295 or iseed < 0:
                     raise ValueError
             except ValueError:
@@ -95,12 +95,12 @@ class QEMURunner(Runner):
             self.pov_file = TracerPoV(self.pov_file)
             self.pov = True
 
-        self.fakeforksrv_path = os.path.join(shellphish_afl.afl_dir('multi-cgc'), "run_via_fakeforksrv")
+        self._fakeforksrv_path = os.path.join(shellphish_afl.afl_dir('multi-cgc'), "run_via_fakeforksrv")
 
         self._setup()
 
         l.debug("Accumulating basic block trace...")
-        l.debug("tracer qemu path: %s", self.trace_source_path)
+        l.debug("tracer qemu path: %s", self._trace_source_path)
 
         self.stdout = None
 
@@ -138,7 +138,7 @@ class QEMURunner(Runner):
 
     def _setup(self):
         # check the binary
-        for binary in self.binaries:
+        for binary in self._binaries:
             if not os.access(binary, os.X_OK):
                 if os.path.isfile(binary):
                     error_msg = "\"%s\" binary is not executable" % binary
@@ -149,17 +149,17 @@ class QEMURunner(Runner):
                     l.error(error_msg)
                     raise TracerEnvironmentError(error_msg)
 
-        if self.is_multicb:
-            if not os.access(self.fakeforksrv_path, os.X_OK):
-                error_msg = "fakeforksrv path %s is not executable" % self.fakeforksrv_path
+        if self._is_multicb:
+            if not os.access(self._fakeforksrv_path, os.X_OK):
+                error_msg = "fakeforksrv path %s is not executable" % self._fakeforksrv_path
                 l.error(error_msg)
                 raise TracerEnvironmentError(error_msg)
 
         # hack for the OS
-        supported_oses = ["cgc", "unix"] + ['_'.join(s.split('_')[1:]).lower() for s in ENUM_EI_OSABI if "ELFOSABI" in s]
+        supported_oses = ["cgc", "unix"] + _DESCR_EI_OSABI.values() 
 
-        if self.os not in supported_oses:
-            error_msg = "\"%s\" runs on an OS not supported by the runner (only cgc and unix at the moment)" % self.binaries[0]
+        if self._os not in supported_oses:
+            error_msg = "\"%s\" runs on an OS not supported by the runner (only cgc and elf at the moment)" % self._binaries[0]
             l.error(error_msg)
             raise TracerEnvironmentError(error_msg)
 
@@ -170,27 +170,27 @@ class QEMURunner(Runner):
         """
         Check the install location of QEMU.
         """
-        if self.os == "cgc":
+        if self._os == "cgc":
             suffix = "tracer" if self._record_trace else "base"
             self.trace_source = "shellphish-qemu-cgc-%s" % suffix
             qemu_platform = "cgc-%s" % suffix
-        elif self.os == "unix":
+        else:
             self.trace_source = "shellphish-qemu-linux-%s" % self._p.arch.qemu_name
             qemu_platform = self._p.arch.qemu_name
 
-        if self.trace_source_path is None or not os.access(self.trace_source_path, os.X_OK):
-            if self.trace_source_path is not None:
-                l.warning("Problem accessing forced %s. Using our default %s.") % (self.trace_source_path, self.trace_source)
+        if self._trace_source_path is None or not os.access(self._trace_source_path, os.X_OK):
+            if self._trace_source_path is not None:
+                l.warning("Problem accessing forced %s. Using our default %s.") % (self._trace_source_path, self.trace_source)
 
-            self.trace_source_path = shellphish_qemu.qemu_path(self.trace_source)
+            self._trace_source_path = shellphish_qemu.qemu_path(self.trace_source)
 
-            if not os.access(self.trace_source_path, os.X_OK):
-                if os.path.isfile(self.trace_source_path):
+            if not os.access(self._trace_source_path, os.X_OK):
+                if os.path.isfile(self._trace_source_path):
                     error_msg = "%s is not executable" % self.trace_source
                     l.error(error_msg)
                     raise TracerEnvironmentError(error_msg)
                 else:
-                    error_msg = "\"%s\" does not exist" % self.trace_source_path
+                    error_msg = "\"%s\" does not exist" % self._trace_source_path
                     l.error(error_msg)
                     raise TracerEnvironmentError(error_msg)
 
@@ -207,19 +207,19 @@ class QEMURunner(Runner):
         saved_limit = resource.getrlimit(resource.RLIMIT_CORE)
         resource.setrlimit(resource.RLIMIT_CORE, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
         binaries_old = [ ]
-        for binary in self.binaries:
+        for binary in self._binaries:
             binaries_old.append(binary)
 
         binary_replacements = [ ]
-        for i, binary in enumerate(self.binaries):
+        for i, binary in enumerate(self._binaries):
             binary_replacements.append(os.path.join(tmpdir,"binary_replacement_%d" % i))
 
         for binary_o, binary_r in zip(binaries_old, binary_replacements):
             shutil.copy(binary_o, binary_r)
 
-        self.binaries = binary_replacements
-        if self.argv is not None and not self.is_multicb:
-            self.argv = self.binaries + self.argv[1:]
+        self._binaries = binary_replacements
+        if self.argv is not None and not self._is_multicb:
+            self.argv = self._binaries + self.argv[1:]
         os.chdir(tmpdir)
         try:
             yield (tmpdir,binary_replacements)
@@ -228,7 +228,7 @@ class QEMURunner(Runner):
             shutil.rmtree(tmpdir)
             os.chdir(curdir)
             resource.setrlimit(resource.RLIMIT_CORE, saved_limit)
-            self.binaries = binaries_old
+            self._binaries = binaries_old
 
     def _run(self, stdout_file=None):
         with self._setup_env() as (tmpdir,binary_replacement_fname):
@@ -255,20 +255,20 @@ class QEMURunner(Runner):
 
                 a_mesg = "Empty core file generated"
                 assert os.path.getsize(core_file) > 0, a_mesg
-                if self.use_tiny_core:
+                if self._use_tiny_core:
                     self._load_tiny_core(core_file)
                 else:
                     self._load_core_values(core_file)
 
     def _run_trace(self, stdout_file=None):
-        if self.is_multicb:
+        if self._is_multicb:
             self._run_multicb_trace(stdout_file)
         else:
             self._run_singlecb_trace(stdout_file)
 
     def _run_multicb_trace(self, stdout_file=None):
-        args = [self.fakeforksrv_path]
-        args += self.binaries
+        args = [self._fakeforksrv_path]
+        args += self._binaries
 
         stderr_file = tempfile.mktemp(dir="/dev/shm/", prefix="tracer-multicb-stderr-")
 
@@ -304,11 +304,11 @@ class QEMURunner(Runner):
 
     def _run_singlecb_trace(self, stdout_file=None):
         logname = tempfile.mktemp(dir="/dev/shm/", prefix="tracer-log-")
-        args = [self.trace_source_path]
+        args = [self._trace_source_path]
 
-        if self.seed is not None:
+        if self._seed is not None:
             args.append("-seed")
-            args.append(str(self.seed))
+            args.append(str(self._seed))
 
         # If the binary is CGC we'll also take this opportunity to read in the
         # magic page.
@@ -321,14 +321,14 @@ class QEMURunner(Runner):
         else:
             args += ["-enable_double_empty_exiting"]
 
-        if self.report_bad_args:
+        if self._report_bad_args:
             args += ["-report_bad_args"]
 
-        args += ["-m", self.memory_limit]
+        args += ["-m", self._memory_limit]
 
-        args += self.argv or [self.binaries[0]]
+        args += self.argv or [self._binaries[0]]
         
-        if self.bitflip:
+        if self._bitflip:
             args = [args[0]] + ["-bitflip"] + args[1:]
 
         with open('/dev/null', 'wb') as devnull:
