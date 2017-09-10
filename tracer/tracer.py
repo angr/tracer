@@ -328,7 +328,7 @@ class Tracer(object):
             if self.trim_history and not self.crash_mode:
                 current.history.trim()
 
-            self.simgr.step(size=bbl_max_bytes)
+            self.simgr = self.simgr.step(size=bbl_max_bytes)
 
             if self.crash_type == EXEC_STACK:
                 self.simgr.stash(from_stash='active', to_stash='crashed')
