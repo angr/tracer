@@ -3,7 +3,7 @@ import nose
 import tracer
 
 import logging
-l = logging.getLogger("tracer.tests.test_tracer")
+l = logging.getLogger("tracer.Tracer").setLevel("DEBUG")
 
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
 pov_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), "povs"))
