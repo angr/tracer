@@ -15,13 +15,13 @@ class Runner(object):
     Base class of trace sources for angr Tracer exploration technique.
     """
 
-    def __init__(self, project=None, binary=None, input=None, record_trace=False,
+    def __init__(self, binary=None, input=None, project=None, record_trace=False,
                  record_core=False, use_tiny_core=False, trace_source_path=None,
                  argv=None):
         """
-        :param project          : The original project.
         :param binary           : Path to the binary to be traced.
         :param input            : Concrete input to feed to binary.
+        :param project          : The original project.
         :param record_trace     : Whether or not to record the basic block trace.
         :param record_core      : Whether or not to record the core file in case of crash.
         :param use_tiny_core    : Use minimal core loading.

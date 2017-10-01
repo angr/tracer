@@ -34,13 +34,13 @@ class QEMURunner(Runner):
     Trace an angr path with a concrete input using QEMU.
     """
 
-    def __init__(self, project=None, binary=None, input=None, record_trace=True, record_stdout=False,
+    def __init__(self, binary=None, input=None, project=None, record_trace=True, record_stdout=False,
                  record_magic=True, record_core=False, seed=None, memory_limit="8G", bitflip=False, report_bad_args=False,
                  use_tiny_core=False, max_size=None, qemu=None, argv=None):
         """
-        :param project       : The original project.
         :param binary        : Path to the binary to be traced.
         :param input         : Concrete input to feed to binary (string or CGC TracerPoV).
+        :param project       : The original project.
         :param record_trace  : Whether or not to record the basic block trace.
         :param record_stdout : Whether ot not to record the output of tracing process.
         :param record_magic  : Whether ot not to record the magic flag page as reported by QEMU.
@@ -56,7 +56,7 @@ class QEMURunner(Runner):
         if type(input) not in (str, TracerPoV):
             raise RunnerEnvironmentError("Input for tracing should be either a string or a TracerPoV for CGC PoV file.")
 
-        Runner.__init__(self, project=project, binary=binary, input=input, record_trace=record_trace,
+        Runner.__init__(self, binary=binary, input=input, project=project, record_trace=record_trace,
                         record_core=record_core, use_tiny_core=use_tiny_core, trace_source_path=qemu, argv=argv)
 
         self._record_magic = record_magic and self.os == 'cgc'
