@@ -9,8 +9,8 @@ import subprocess
 import shellphish_qemu
 from .tracerpov import TracerPoV
 from .cachemanager import LocalCacheManager
-from .simprocedures import receive
-from .simprocedures import FixedOutTransmit, FixedInReceive, FixedRandom
+from angr.misc.tracer.simprocedures import receive
+from angr.misc.tracer.simprocedures import FixedOutTransmit, FixedInReceive, FixedRandom
 from angr import sim_options as so
 
 import logging

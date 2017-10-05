@@ -89,7 +89,8 @@ class QEMURunner(Runner):
 
         self.input_max_size = max_size or len(input) if input is not None else None
 
-        self._fakeforksrv_path = os.path.join(shellphish_afl.afl_dir('multi-cgc'), "run_via_fakeforksrv")
+        if self._is_multicb:
+            self._fakeforksrv_path = os.path.join(shellphish_afl.afl_dir('multi-cgc'), "run_via_fakeforksrv")
 
         self._setup()
 
@@ -247,6 +248,7 @@ class QEMURunner(Runner):
 
                 a_mesg = "Empty core file generated"
                 assert os.path.getsize(core_file) > 0, a_mesg
+
                 if self._use_tiny_core:
                     self._load_tiny_core(core_file)
                 else:
