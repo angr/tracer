@@ -470,7 +470,7 @@ class Tracer(object):
 
         # keep calling next_branch until it quits
         branches = None
-        while (branches is None or len(branches.active)) and self.bb_cnt < len(self.trace):
+        while branches is None or (len(branches.active) and self.bb_cnt < len(self.trace)):
             branches = self.next_branch()
 
             # if we spot a crashed path in crash mode return the goods
