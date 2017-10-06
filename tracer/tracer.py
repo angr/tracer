@@ -107,6 +107,7 @@ class Tracer(object):
         self.constrained_addrs = []
         # the final state after execution with input/pov_file
         self.final_state = None
+        self.about_to_crash = None
 
         cm = LocalCacheManager(dump_cache=dump_cache) if GlobalCacheManager is None else GlobalCacheManager
         # cache managers need the tracer to be set for them
@@ -1069,12 +1070,18 @@ class Tracer(object):
         # then we step again up to the crashing instruction
         p_block = state.project.factory.block(state.addr, backup_state=state)
         inst_cnt = len(p_block.instruction_addrs)
-        insts = 0 if inst_cnt == 0 else inst_cnt - 1
+        if inst_cnt == 0:
+            insts = 0
+        elif self.crash_addr in p_block.instruction_addrs:
+            insts = p_block.instruction_addrs.index(self.crash_addr) + 1
+        else:
+            insts = inst_cnt - 1
         succs = state.project.factory.successors(state, num_inst=insts).flat_successors
         if len(succs) > 0:
             if len(succs) > 1:
                 succs = [s for s in succs if s.se.satisfiable()]
             state = succs[0]
+            self.about_to_crash = state
 
         # remove the preconstraints
         l.debug("removing preconstraints")
