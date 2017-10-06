@@ -95,7 +95,8 @@ class Runner(object):
         self.tracer_qemu_path = None
         self.forced_qemu = qemu
 
-        self.fakeforksrv_path = os.path.join(shellphish_afl.afl_dir('multi-cgc'), "run_via_fakeforksrv")
+        if multicb_available:
+            self.fakeforksrv_path = os.path.join(shellphish_afl.afl_dir('multi-cgc'), "run_via_fakeforksrv")
 
         self._setup()
 
