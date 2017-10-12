@@ -1,7 +1,7 @@
 import pickle
 import claripy
 import logging
-from ..simprocedures import receive
+from angr.misc.tracer.simprocedures import receive
 
 l = logging.getLogger("tracer.cachemanager.CacheManager")
 

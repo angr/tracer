@@ -1,9 +1,11 @@
 import xml.etree.ElementTree
 
+from angr.storage.file import SimDialogue
+
 class TracerPoV(object):
-    '''
-    Simple PoV parser for Tracer
-    '''
+    """
+    Simple PoV parser for Tracer.
+    """
 
     def __init__(self, filename):
         self.filename = filename
@@ -15,7 +17,7 @@ class TracerPoV(object):
         self._raw_reads = self._root.find('replay').findall('read')
         self._collect_variables()
         self._clean_writes()
-
+        self.stdin = self._prepare_dialogue()
 
     def _collect_variables(self):
         self._variables = dict()
@@ -38,9 +40,9 @@ class TracerPoV(object):
                     self._variables[varname] = current_var[begin:end]
 
     def _clean_writes(self):
-        '''
-        decode writes
-        '''
+        """
+        Decode writes.
+        """
 
         self.writes = []
         for raw_write in self._raw_writes:
@@ -68,6 +70,16 @@ class TracerPoV(object):
                     raise ValueError("unrecognized mode '%s' in file '%s'" % (mode_i, self.filename))
             self.writes.append(body)
 
+    def _prepare_dialogue(self):
+        """
+        Prepare a SimDialogue entry for stdin.
+        """
+
+        s = SimDialogue("/dev/stdin")
+        for write in self.writes:
+            s.add_dialogue_entry(len(write))
+
+        return {"/dev/stdin": s}
 
 def test():
     tracerpov = TracerPoV('../tests/for-release__GEN_00391.xml')
