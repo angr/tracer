@@ -72,10 +72,16 @@ def test_crash_addr_detection():
     nose.tools.assert_true(crash_state.se.symbolic(crash_state.regs.ip))
 
 def run_all():
+    def print_test_name(name):
+        print '#' * (len(name) + 8)
+        print '###', name, '###'
+        print '#' * (len(name) + 8)
+
     functions = globals()
     all_functions = dict(filter((lambda (k, v): k.startswith('test_')), functions.items()))
     for f in sorted(all_functions.keys()):
         if hasattr(all_functions[f], '__call__'):
+            print_test_name(f)
             all_functions[f]()
 
 
