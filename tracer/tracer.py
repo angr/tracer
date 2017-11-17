@@ -52,12 +52,23 @@ class Tracer(object):
         if pov_file is not None:
             input = TracerPoV(pov_file)
 
+        exclude_sim_procedures_list = exclude_sim_procedures_list or ('malloc', 'free', 'calloc', 'realloc')
+        simprocedures = {} if simprocedures is None else simprocedures
+        hooks = {} if hooks is None else hooks
+
         self.r = QEMURunner(binary=binary, input=input, seed=seed, argv=argv, project=project)
-        p = angr.misc.tracer.make_tracer_project(binary=binary,
-                                                 simprocedures=simprocedures,
-                                                 hooks=hooks,
-                                                 exclude_sim_procedures_list=exclude_sim_procedures_list)
+        p = angr.Project(binary, exclude_sim_procedures_list=exclude_sim_procedures_list)
+
+        for addr, proc in hooks.iteritems():
+            p.hook(addr, proc)
+            l.debug("Hooking %#x -> %s...", addr, proc.display_name)
+
         if p.loader.main_object.os == 'cgc':
+            p._simos.syscall_library.procedures.update(angr.TRACER_CGC_SYSCALLS)
+
+            for symbol in simprocedures:
+                angrSIM_LIBRARIES['cgcabi'].add(symbol, simprocedures[symbol])
+
             s = p.factory.tracer_state(input_content=input,
                                        magic_content=self.r.magic,
                                        preconstrain_input=preconstrain_input,
@@ -65,6 +76,9 @@ class Tracer(object):
                                        add_options=add_options if add_options is not None else set(),
                                        remove_options=remove_options if remove_options is not None else set())
         elif p.loader.main_object.os.startswith('UNIX'):
+            for symbol in simprocedures:
+                p.hook_symbol(symbol, simprocedures[symbol])
+
             s = p.factory.tracer_state(input_content=input,
                                        magic_content=self.r.magic,
                                        preconstrain_input=preconstrain_input,
