@@ -1,7 +1,8 @@
 import os
-import rex.trace_additions
 import nose
 import tracer
+
+from angr.state_plugins.trace_additions import ZenPlugin
 
 import logging
 l = logging.getLogger("tracer.tests.test_cache_stall")
@@ -15,7 +16,7 @@ logging.getLogger("tracer").setLevel("DEBUG")
 def test_cache_stall():
     # test a valid palindrome
     t = tracer.Tracer(os.path.join(bin_location, "tests/cgc/CROMU_00071"), "0c0c492a53acacacacacacacacacacacacac000100800a0b690e0aef6503697d660a0059e20afc0a0a332f7d66660a0059e20afc0a0a332f7fffffff16fb1616162516161616161616166a7dffffff7b0e0a0a6603697d660a0059e21c".decode('hex'))
-    rex.trace_additions.ZenPlugin.prep_tracer(t.simgr.one_active)
+    ZenPlugin.prep_tracer(t.simgr.one_active)
     crash_path, crash_state = t.run()
 
     nose.tools.assert_not_equal(crash_path, None)
@@ -23,7 +24,7 @@ def test_cache_stall():
 
     # load it again
     t = tracer.Tracer(os.path.join(bin_location, "tests/cgc/CROMU_00071"), "0c0c492a53acacacacacacacacacacacacac000100800a0b690e0aef6503697d660a0059e20afc0a0a332f7d66660a0059e20afc0a0a332f7fffffff16fb1616162516161616161616166a7dffffff7b0e0a0a6603697d660a0059e21c".decode('hex'))
-    rex.trace_additions.ZenPlugin.prep_tracer(t.simgr.one_active)
+    ZenPlugin.prep_tracer(t.simgr.one_active)
     crash_path, crash_state = t.run()
 
     nose.tools.assert_not_equal(crash_path, None)
