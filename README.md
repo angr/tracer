@@ -1,8 +1,10 @@
-# WARNING
-This package is deprecated. All the work has been merged to angr as Tracer and
-CrashMonitor exploration techniques. Although we do provide a layer for
-backward compatibility here, direct use of these new exploration techniques in angr
-is preferred, since it offers more flexibility.
+# Tracer
+
+This package is in a bit of a complicated transition phase - it originally housed the concolic tracing helpers for angr, but those pieces of code have since been merged into angr proper.
+Now, there are still deprecated compatibility layers for this functionality, but the real purpose of this repository should be a set of tools to provide a consistent API for various dynamic trace backends.
+
+The only one currently available is based on qemu-user - `tracer.QEMURunner`.
+It relies on some special builds of qemu we've hacked to actually output these traces without the normal problems you sometimes see from qemu's traces with respect to basic block consolidation and optimization.
 
 # Installation
 If you have QEMU compilation problems, installing these packages may be useful (tested on Ubuntu 14.04 64bit):
