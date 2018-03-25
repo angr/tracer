@@ -1,6 +1,6 @@
 import xml.etree.ElementTree
 
-from angr.storage.file import SimDialogue
+from angr.storage.file import SimPacketsSlots
 
 class TracerPoV(object):
     """
@@ -72,13 +72,9 @@ class TracerPoV(object):
 
     def _prepare_dialogue(self):
         """
-        Prepare a SimDialogue entry for stdin.
+        Prepare a data storage entry for stdin
         """
-
-        s = SimDialogue("/dev/stdin")
-        for write in self.writes:
-            s.add_dialogue_entry(len(write))
-
+        s = SimPacketsSlots('stdin', [len(write) for write in self.writes])
         return {"/dev/stdin": s}
 
 def test():
