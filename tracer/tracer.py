@@ -1,10 +1,10 @@
 import angr
-from angr.exploration_techniques import CrashMonitor, Oppologist
 
 from . import QEMURunner
 from . import TracerPoV
 
 import logging
+l = logging.getLogger('tracer.tracer')
 
 class Tracer(object):
     """
@@ -43,8 +43,7 @@ class Tracer(object):
                                             must be greater than 0.
         """
 
-        msg = "Tracer package is deprecated, please use Tracer and CrashMonitor exploration techniques instead."
-        logging.getLogger("tracer.tracer").warning(msg)
+        l.warning("Tracer package is deprecated, please use Tracer and CrashMonitor exploration techniques instead.")
 
         if pov_file is not None and input is not None:
             raise ValueError("Cannot specify both a pov_file and an input.")
@@ -64,45 +63,52 @@ class Tracer(object):
             l.debug("Hooking %#x -> %s...", addr, proc.display_name)
 
         if p.loader.main_object.os == 'cgc':
-            p._simos.syscall_library.update(angr.SIM_LIBRARIES['cgcabi_tracer'])
+            p.simos.syscall_library.update(angr.SIM_LIBRARIES['cgcabi_tracer'])
 
             for symbol in simprocedures:
-                angrSIM_LIBRARIES['cgcabi'].add(symbol, simprocedures[symbol])
+                angr.SIM_LIBRARIES['cgcabi'].add(symbol, simprocedures[symbol])
 
-            s = p.factory.tracer_state(input_content=input,
-                                       magic_content=self.r.magic,
-                                       preconstrain_input=preconstrain_input,
-                                       preconstrain_flag=preconstrain_flag,
-                                       add_options=add_options if add_options is not None else set(),
-                                       remove_options=remove_options if remove_options is not None else set())
+            s = p.factory.entry_state(
+                    mode='tracing',
+                    stdin=angr.SimFileStream if preconstrain_input else input,
+                    flag_page=self.r.magic,
+                    add_options=add_options,
+                    remove_options=remove_options)
+            if preconstrain_input:
+                s.preconstrainer.preconstrain_file(input, s.posix.stdin, True)
+            #if preconstrain_flag:
+            #    s.preconstrainer.preconstrain_flag_page(self.r.magic)
+
         elif p.loader.main_object.os.startswith('UNIX'):
             for symbol in simprocedures:
                 p.hook_symbol(symbol, simprocedures[symbol])
 
-            s = p.factory.tracer_state(input_content=input,
-                                       magic_content=self.r.magic,
-                                       preconstrain_input=preconstrain_input,
-                                       preconstrain_flag=preconstrain_flag,
-                                       add_options=add_options if add_options is not None else set(),
-                                       remove_options=remove_options if remove_options is not None else set(),
-                                       chroot=chroot,
-                                       args=argv)
+            s = p.factory.full_init_state(
+                    mode='tracing',
+                    stdin=angr.SimFileStream if preconstrain_input else input,
+                    add_options=add_options,
+                    remove_options=remove_options,
+                    chroot=chroot, args=argv)
+            if preconstrain_input:
+                s.preconstrainer.preconstrain_file(input, s.posix.stdin, True)
 
         self.simgr = p.factory.simgr(s,
                                      save_unsat=True,
                                      hierarchy=False,
                                      save_unconstrained=self.r.crash_mode)
-        self.t = angr.exploration_techniques.Tracer(trace=self.r.trace,
-                                                    resiliency=resiliency,
-                                                    dump_syscall=dump_syscall,
-                                                    keep_predecessors=keep_predecessors)
-        self.c = CrashMonitor(trace=self.r.trace,
-                              trim_history=trim_history,
-                              crash_mode=self.r.crash_mode,
-                              crash_addr=self.r.crash_addr)
+        self.t = angr.exploration_techniques.Tracer(
+                trace=self.r.trace,
+                resiliency=resiliency,
+                dump_syscall=dump_syscall,
+                keep_predecessors=keep_predecessors)
 
-        self.simgr.use_technique(self.c)
+        if self.r.crash_mode:
+            self.c = angr.exploration_techniques.CrashMonitor(
+                    trace=self.r.trace,
+                    crash_addr=self.r.crash_addr)
+            self.simgr.use_technique(self.c)
         self.simgr.use_technique(self.t)
+
         self.simgr.use_technique(angr.exploration_techniques.Oppologist())
 
     def run(self):
