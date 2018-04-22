@@ -7,8 +7,10 @@ import socket
 import logging
 import resource
 import tempfile
-import subprocess
+import subprocess32
 import contextlib
+import resource
+import re
 
 from .tracerpov import TracerPoV
 from .tinycore import TinyCore
@@ -36,7 +38,8 @@ class QEMURunner(Runner):
 
     def __init__(self, binary=None, input=None, project=None, record_trace=True, record_stdout=False,
                  record_magic=True, record_core=False, seed=None, memory_limit="8G", bitflip=False, report_bad_args=False,
-                 use_tiny_core=False, max_size=None, qemu=None, argv=None):
+                 use_tiny_core=False, max_size=None, qemu=None, argv=None,
+                 trace_log_limit=2**30, trace_timeout=10):
         """
         :param binary        : Path to the binary to be traced.
         :param input         : Concrete input to feed to binary (string or CGC TracerPoV).
@@ -52,6 +55,10 @@ class QEMURunner(Runner):
         :param qemu          : Path to QEMU to be forced used.
         :param argv          : Optionally specify argv params (i,e,: ['./calc', 'parm1']).
                                Defaults to binary name with no params.
+        :param trace_log_limit: Optionally specify the dynamic trace log file
+            size limit in bytes, defaults to 1G.
+        :param trace_timeout  : Optionally specify the dymamic time limit in seconds
+            defaults to 10 seconds.
         """
         if type(input) not in (str, TracerPoV):
             raise RunnerEnvironmentError("Input for tracing should be either a string or a TracerPoV for CGC PoV file.")
@@ -59,6 +66,7 @@ class QEMURunner(Runner):
         Runner.__init__(self, binary=binary, input=input, project=project, record_trace=record_trace,
                         record_core=record_core, use_tiny_core=use_tiny_core, trace_source_path=qemu, argv=argv)
 
+        self.tmout = False
         self._record_magic = record_magic and self.os == 'cgc'
 
         if record_trace and self.is_multicb:
@@ -89,6 +97,8 @@ class QEMURunner(Runner):
 
         self.input_max_size = max_size or len(input) if input is not None else None
 
+        self.trace_log_limit = trace_log_limit
+        self.trace_timeout = trace_timeout
         if self.is_multicb:
             self._fakeforksrv_path = os.path.join(shellphish_afl.afl_dir('multi-cgc'), "run_via_fakeforksrv")
 
@@ -260,6 +270,14 @@ class QEMURunner(Runner):
         else:
             self._run_singlecb_trace(stdout_file)
 
+    def __get_rlimit_func(self):
+        def set_fsize():
+            # here we limit the logsize
+            resource.setrlimit(resource.RLIMIT_FSIZE,
+                               (self.trace_log_limit , self.trace_log_limit))
+
+        return set_fsize
+
     def _run_multicb_trace(self, stdout_file=None):
         args = [self._fakeforksrv_path]
         args += self._binaries
@@ -276,10 +294,22 @@ class QEMURunner(Runner):
 
             stderr_f = open(stderr_file, 'wb')
 
-            p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=stdout_f, stderr=stderr_f, close_fds=True)
-            _, _ = p.communicate(self.input)
+            p = None
+            try:
+                p = subprocess32.Popen(args, stdin=subprocess32.PIPE,
+                                       stdout=stdout_f,
+                                       stderr=stderr_f, close_fds=True,
+                                       preexec_fn=self.__get_rlimit_func())
 
-            ret = p.wait()
+                _, _ = p.communicate(self.input, timeout=self.trace_timeout)
+
+                ret = p.wait(timeout=self.trace_timeout)
+
+            except:
+                if p != None:
+                    p.terminate()
+                    self.tmout = True
+
             self.returncode = p.returncode
 
             if stdout_file is not None:
@@ -327,64 +357,92 @@ class QEMURunner(Runner):
         if self._bitflip:
             args = [args[0]] + ["-bitflip"] + args[1:]
 
+
+
         with open('/dev/null', 'wb') as devnull:
             stdout_f = devnull
             if stdout_file is not None:
                 stdout_f = open(stdout_file, 'wb')
 
-            # we assume qemu with always exit and won't block
-            if type(self.input) == str:
-                l.debug("Tracing as raw input")
-                l.debug(" ".join(args))
-                p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=stdout_f, stderr=devnull)
-                _, _ = p.communicate(self.input)
-            else:
-                l.debug("Tracing as pov file")
-                in_s, out_s = socket.socketpair()
-                p = subprocess.Popen(args, stdin=in_s, stdout=stdout_f, stderr=devnull)
+            p = None
+            try:
+                # we assume qemu with always exit and won't block
+                if type(self.input) == str:
+                    l.debug("Tracing as raw input")
+                    l.debug(" ".join(args))
+                    p = subprocess32.Popen(args, stdin=subprocess32.PIPE,
+                                           stdout=stdout_f, stderr=devnull,
+                                           preexec_fn=self.__get_rlimit_func())
 
-                for write in self.input.writes:
-                    out_s.send(write)
-                    time.sleep(.01)
+                    _, _ = p.communicate(self.input, timeout=self.trace_timeout)
+                else:
+                    l.debug("Tracing as pov file")
+                    in_s, out_s = socket.socketpair()
+                    p = subprocess32.Popen(args, stdin=in_s, stdout=stdout_f,
+                                           stderr=devnull,
+                                           preexec_fn=self.__get_rlimit_func())
 
-            ret = p.wait()
+                    for write in self.input.writes:
+                        out_s.send(write)
+                        time.sleep(.01)
+
+                ret = p.wait(timeout=self.trace_timeout)
+
+                # did a crash occur?
+                if ret < 0:
+                    if abs(ret) == signal.SIGSEGV or abs(ret) == signal.SIGILL:
+                        l.info("Input caused a crash (signal %d) during dynamic tracing", abs(ret))
+                        l.debug(repr(self.input))
+                        l.debug("Crash mode is set")
+                        self.crash_mode = True
+
+            except subprocess32.TimeoutExpired as e:
+                if p != None:
+                    p.terminate()
+                    self.tmout = True
+
             self.returncode = p.returncode
-            # did a crash occur?
-            if ret < 0:
-                if abs(ret) == signal.SIGSEGV or abs(ret) == signal.SIGILL:
-                    l.info("Input caused a crash (signal %d) during dynamic tracing", abs(ret))
-                    l.debug(repr(self.input))
-                    l.debug("Crash mode is set")
-                    self.crash_mode = True
 
             if stdout_file is not None:
                 stdout_f.close()
 
         if self._record_trace:
-            trace = open(logname).read()
-            addrs = [int(v.split('[')[1].split(']')[0], 16)
+            try:
+                trace = open(logname).read()
+                addrs = [int(v.split('[')[1].split(']')[0], 16)
                      for v in trace.split('\n')
                      if v.startswith('Trace')]
 
-            # Find where qemu loaded the binary. Primarily for PIE
-            qemu_base_addr = int(trace.split("start_code")[1].split("\n")[0],16)
-            if self.base_addr != qemu_base_addr and self._p.loader.main_object.pic:
-                self.base_addr = qemu_base_addr
-                self.rebase = True
+                # Find where qemu loaded the binary. Primarily for PIE
+                qemu_base_addr = int(trace.split("start_code")[1].split("\n")[0],16)
+                if self.base_addr != qemu_base_addr and self._p.loader.main_object.pic:
+                    self.base_addr = qemu_base_addr
+                    self.rebase = True
 
-            # grab the faulting address
-            if self.crash_mode:
-                self.crash_addr = int(trace.split('\n')[-2].split('[')[1].split(']')[0], 16)
+                # grab the faulting address
+                if self.crash_mode:
+                    self.crash_addr = int(trace.split('\n')[-2].split('[')[1].split(']')[0], 16)
 
-            os.remove(logname)
-            self.trace = addrs
-            l.debug("Trace consists of %d basic blocks", len(self.trace))
+
+                self.trace = addrs
+                l.debug("Trace consists of %d basic blocks", len(self.trace))
+            except:
+                l.warning("""One trace is found to be malformated,
+                it is possible that the log file size exceeds the 1G limit,
+                meaning that there might be infinite loops in the target program""")
+            finally:
+                os.remove(logname)
 
         if self._record_magic:
-            self.magic = open(mname).read()
-            a_mesg = "Magic content read from QEMU improper size, should be a page in length"
-            assert len(self.magic) == 0x1000, a_mesg
-            os.remove(mname)
+            try:
+                self.magic = open(mname).read()
+                a_mesg = "Magic content read from QEMU improper size, should be a page in length"
+                assert len(self.magic) == 0x1000, a_mesg
+                os.remove(mname)
+            except:
+                pass
+            finally:
+                os.remove(mname)
 
     def _load_core_values(self, core_file):
         p = angr.Project(core_file)
