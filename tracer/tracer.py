@@ -51,6 +51,9 @@ class Tracer(object):
         if pov_file is not None:
             input = TracerPoV(pov_file)
 
+        if argv is not None and not isinstance(argv, list):
+            raise ValueError("argv should be of list type")
+
         exclude_sim_procedures_list = exclude_sim_procedures_list or ('malloc', 'free', 'calloc', 'realloc')
         simprocedures = {} if simprocedures is None else simprocedures
         hooks = {} if hooks is None else hooks
