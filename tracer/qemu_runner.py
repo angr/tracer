@@ -438,11 +438,13 @@ class QEMURunner(Runner):
                 self.magic = open(mname).read()
                 a_mesg = "Magic content read from QEMU improper size, should be a page in length"
                 assert len(self.magic) == 0x1000, a_mesg
-                os.remove(mname)
             except:
                 pass
             finally:
-                os.remove(mname)
+                try:
+                    os.remove(mname)
+                except:
+                    pass
 
     def _load_core_values(self, core_file):
         p = angr.Project(core_file)
