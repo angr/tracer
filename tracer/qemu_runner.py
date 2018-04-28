@@ -409,6 +409,7 @@ class QEMURunner(Runner):
             try:
                 trace = open(logname).read()
                 addrs = []
+                self.trace = addrs
 
                 # Find where qemu loaded the binary. Primarily for PIE
                 qemu_base_addr = int(trace.split("start_code")[1].split("\n")[0], 16)
@@ -428,9 +429,6 @@ class QEMURunner(Runner):
                 # grab the faulting address
                 if self.crash_mode:
                     self.crash_addr = int(trace.split('\n')[-2].split('[')[1].split(']')[0], 16)
-
-
-                self.trace = addrs
                 l.debug("Trace consists of %d basic blocks", len(self.trace))
             except IndexError:
                 l.warning("""One trace is found to be malformated,
