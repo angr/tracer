@@ -9,8 +9,6 @@ bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '..
 pov_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), "povs"))
 test_data_location = str(os.path.dirname(os.path.realpath(__file__)))
 
-logging.getLogger("tracer").setLevel("DEBUG")
-
 def test_recursion():
     t = tracer.Tracer(os.path.join(bin_location, "cgc", "CROMU_00071"), open('crash2731').read())
 
@@ -25,6 +23,7 @@ def run_all():
 
 
 if __name__ == "__main__":
+    logging.getLogger("tracer").setLevel("DEBUG")
 
     import sys 
     if len(sys.argv) > 1:

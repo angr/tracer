@@ -5,8 +5,6 @@ import logging
 
 from tracer import QEMURunner
 
-logging.getLogger('tracer.qemu_runner').setLevel('DEBUG')
-
 bin_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../binaries'))
 pov_location = str(os.path.join(os.path.dirname(os.path.realpath(__file__)), "povs"))
 test_data_location = str(os.path.dirname(os.path.realpath(__file__)))
@@ -46,6 +44,7 @@ def run_all():
 
 
 if __name__ == "__main__":
+    logging.getLogger('tracer.qemu_runner').setLevel('DEBUG')
 
     import sys
     if len(sys.argv) > 1:
