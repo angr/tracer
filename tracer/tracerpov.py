@@ -79,7 +79,7 @@ class TracerPoV(object):
 
 def test():
     tracerpov = TracerPoV('../tests/for-release__GEN_00391.xml')
-    print tracerpov.writes
+    print(tracerpov.writes)
 
 if __name__ == "__main__":
     test()

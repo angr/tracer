@@ -61,7 +61,7 @@ class Tracer(object):
         self.r = QEMURunner(binary=binary, input=input, seed=seed, argv=argv, project=project)
         p = angr.Project(binary, exclude_sim_procedures_list=exclude_sim_procedures_list)
 
-        for addr, proc in hooks.iteritems():
+        for addr, proc in hooks.items():
             p.hook(addr, proc)
             l.debug("Hooking %#x -> %s...", addr, proc.display_name)
 
