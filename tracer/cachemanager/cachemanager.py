@@ -33,7 +33,7 @@ class CacheManager(object):
             try:
                 pickle.dump((self.tracer.bb_cnt, self.tracer.cgc_flag_bytes, state, claripy.ast.base.var_counter), dump_fp, pickle.HIGHEST_PROTOCOL)
             except RuntimeError as e: # maximum recursion depth can be reached here
-                l.error("unable to cache state, '%s' during pickling", e.message)
+                l.error("unable to cache state, '%s' during pickling", e)
             finally:
                 state.project = proj
 
