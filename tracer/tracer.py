@@ -94,6 +94,8 @@ class Tracer(object):
                     chroot=chroot, args=argv)
             if preconstrain_input:
                 s.preconstrainer.preconstrain_file(input, s.posix.stdin, True)
+        else:
+            raise ValueError("Can't trace binary for operating system %s" % p.loader.main_object.os)
 
         self.simgr = p.factory.simgr(s,
                                      save_unsat=True,

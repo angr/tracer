@@ -125,7 +125,7 @@ class TinyCore(object):
             note_pos += n_size
 
         # prstatus
-        prstatus_list = filter(lambda x: x.n_type == 'NT_PRSTATUS', self.notes)
+        prstatus_list = [x for x in self.notes if x.n_type == 'NT_PRSTATUS']
         if len(prstatus_list) > 1:
             l.warning("multiple prstatus")
         if len(prstatus_list) == 0:
@@ -185,7 +185,7 @@ class TinyCore(object):
         pos += arch_bytes * 2
 
         # parse out general purpose registers
-        rnames = ['ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp', 'eax', 'ds', 'es', 'fs', 'gs', 'xxx', 'eip', \
+        rnames = ['ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp', 'eax', 'ds', 'es', 'fs', 'gs', 'xxx', 'eip',
                   'cs', 'eflags', 'esp', 'ss']
         nreg = 17
 
