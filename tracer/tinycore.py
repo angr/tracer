@@ -112,8 +112,8 @@ class TinyCore(object):
             if len(to_unpack) != 12:
                 break
             name_sz, desc_sz, n_type = struct.unpack("<3I", to_unpack)
-            name_sz_rounded = (((name_sz + (4 - 1)) / 4) * 4)
-            desc_sz_rounded = (((desc_sz + (4 - 1)) / 4) * 4)
+            name_sz_rounded = (((name_sz + (4 - 1)) // 4) * 4)
+            desc_sz_rounded = (((desc_sz + (4 - 1)) // 4) * 4)
             # description size + the rounded name size + header size
             n_size = desc_sz_rounded + name_sz_rounded + 12
 
