@@ -68,7 +68,7 @@ def test_crash_addr_detection():
     t = tracer.Tracer(os.path.join(bin_location, "tests/i386/call_symbolic"), b"A" * 700)
     _, crash_state = t.run()
 
-    nose.tools.assert_true(crash_state.se.symbolic(crash_state.regs.ip))
+    nose.tools.assert_true(crash_state.solver.symbolic(crash_state.regs.ip))
 
 def run_all():
     def print_test_name(name):
