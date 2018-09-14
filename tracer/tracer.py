@@ -97,7 +97,7 @@ class Tracer(object):
         else:
             raise ValueError("Can't trace binary for operating system %s" % p.loader.main_object.os)
 
-        self.simgr = p.factory.simgr(s,
+        self.simgr = p.factory.simulation_manager(s,
                                      save_unsat=True,
                                      hierarchy=False,
                                      save_unconstrained=self.r.crash_mode)
