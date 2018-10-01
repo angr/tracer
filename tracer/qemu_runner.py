@@ -7,7 +7,7 @@ import logging
 import resource
 import tempfile
 import re
-import subprocess32
+import subprocess32 as subprocess
 import contextlib
 
 l = logging.getLogger("tracer.qemu_runner")
@@ -22,13 +22,14 @@ try:
 except ImportError:
     raise ImportError("Unable to import shellphish_qemu, which is required by QEMURunner. Please install it before proceeding.")
 
-multicb_available = True
 
 try:
     import shellphish_afl
+    MULTICB_AVAILABLE = True
 except ImportError:
     l.warning("Unable to import shellphish_afl, multicb tracing will be disabled")
-    multicb_available = False
+    shellphish_afl = None
+    MULTICB_AVAILABLE = False
 
 class QEMURunner(Runner):
     """
@@ -47,7 +48,7 @@ class QEMURunner(Runner):
         :param record_stdout : Whether ot not to record the output of tracing process.
         :param record_magic  : Whether ot not to record the magic flag page as reported by QEMU.
         :param record_core   : Whether or not to record the core file in case of crash.
-        :param report_bad_arg: Enable CGC QEMU's report bad args option.
+        :param report_bad_args: Enable CGC QEMU's report bad args option.
         :param use_tiny_core : Use minimal core loading.
         :param max_size      : Optionally set max size of input. Defaults to size
                                of preconstrained input.
@@ -59,8 +60,8 @@ class QEMURunner(Runner):
         :param trace_timeout  : Optionally specify the dymamic time limit in seconds
             defaults to 10 seconds.
         """
-        if type(input) not in (str, TracerPoV):
-            raise RunnerEnvironmentError("Input for tracing should be either a string or a TracerPoV for CGC PoV file.")
+        if type(input) not in (bytes, TracerPoV):
+            raise RunnerEnvironmentError("Input for tracing should be either a bytestring or a TracerPoV for CGC PoV file.")
 
         Runner.__init__(self, binary=binary, input=input, project=project, record_trace=record_trace,
                         record_core=record_core, use_tiny_core=use_tiny_core, trace_source_path=qemu, argv=argv)
@@ -71,7 +72,7 @@ class QEMURunner(Runner):
         if record_trace and self.is_multicb:
             l.warning("record_trace specified with multicb, no trace will be recorded")
 
-        if isinstance(seed, (int, long)):
+        if isinstance(seed, int):
             seed = str(seed)
         self._seed = seed
         self._memory_limit = memory_limit
@@ -241,10 +242,7 @@ class QEMURunner(Runner):
                 # find core file
                 binary_common_prefix = "_".join(os.path.basename(binary_replacement_fname[0]).split("_")[:2])
                 unique_prefix = "qemu_{}".format(os.path.basename(binary_common_prefix))
-                core_files = filter(
-                        lambda x: x.startswith(unique_prefix) and x.endswith('.core'),
-                        os.listdir('.')
-                        )
+                core_files = [x for x in os.listdir('.') if x.startswith(unique_prefix) and x.endswith('.core')]
 
                 a_mesg = "No core files found for binary, this shouldn't happen"
                 assert len(core_files) > 0, a_mesg
@@ -295,7 +293,7 @@ class QEMURunner(Runner):
 
             p = None
             try:
-                p = subprocess32.Popen(args, stdin=subprocess32.PIPE,
+                p = subprocess.Popen(args, stdin=subprocess.PIPE,
                                        stdout=stdout_f,
                                        stderr=stderr_f, close_fds=True,
                                        preexec_fn=self.__get_rlimit_func())
@@ -304,7 +302,7 @@ class QEMURunner(Runner):
 
                 ret = p.wait(timeout=self.trace_timeout)
 
-            except subprocess32.TimeoutExpired:
+            except subprocess.TimeoutExpired:
                 if p != None:
                     p.terminate()
                     self.tmout = True
@@ -319,11 +317,11 @@ class QEMURunner(Runner):
         if saved_afl_path:
             os.environ['AFL_PATH'] = saved_afl_path
 
-        with open(stderr_file, 'r') as f:
+        with open(stderr_file, 'rb') as f:
             buf = f.read()
-            for line in buf.split("\n"):
-                if "signaled" in line:
-                    self.crash_mode = bool(int(line.split(":")[-1]))
+            for line in buf.split(b"\n"):
+                if b"signaled" in line:
+                    self.crash_mode = bool(int(line.split(b":")[-1]))
 
     def _run_singlecb_trace(self, stdout_file=None):
         logname = tempfile.mktemp(dir="/dev/shm/", prefix="tracer-log-")
@@ -338,6 +336,8 @@ class QEMURunner(Runner):
         if self._record_magic:
             mname = tempfile.mktemp(dir="/dev/shm/", prefix="tracer-magic-")
             args += ["-magicdump", mname]
+        else:
+            mname = None
 
         if self._record_trace:
             args += ["-d", "exec", "-D", logname]
@@ -366,10 +366,10 @@ class QEMURunner(Runner):
             p = None
             try:
                 # we assume qemu with always exit and won't block
-                if type(self.input) == str:
+                if type(self.input) is bytes:
                     l.debug("Tracing as raw input")
                     l.debug(" ".join(args))
-                    p = subprocess32.Popen(args, stdin=subprocess32.PIPE,
+                    p = subprocess.Popen(args, stdin=subprocess.PIPE,
                                            stdout=stdout_f, stderr=devnull,
                                            preexec_fn=self.__get_rlimit_func())
 
@@ -377,7 +377,7 @@ class QEMURunner(Runner):
                 else:
                     l.debug("Tracing as pov file")
                     in_s, out_s = socket.socketpair()
-                    p = subprocess32.Popen(args, stdin=in_s, stdout=stdout_f,
+                    p = subprocess.Popen(args, stdin=in_s, stdout=stdout_f,
                                            stderr=devnull,
                                            preexec_fn=self.__get_rlimit_func())
 
@@ -395,8 +395,8 @@ class QEMURunner(Runner):
                         l.debug("Crash mode is set")
                         self.crash_mode = True
 
-            except subprocess32.TimeoutExpired:
-                if p != None:
+            except subprocess.TimeoutExpired:
+                if p is not None:
                     p.terminate()
                     self.tmout = True
 
@@ -407,17 +407,17 @@ class QEMURunner(Runner):
 
         if self._record_trace:
             try:
-                trace = open(logname).read()
+                trace = open(logname, 'rb').read()
                 addrs = []
 
                 # Find where qemu loaded the binary. Primarily for PIE
-                qemu_base_addr = int(trace.split("start_code")[1].split("\n")[0], 16)
+                qemu_base_addr = int(trace.split(b"start_code")[1].split(b"\n")[0], 16)
                 if self.base_addr != qemu_base_addr and self._p.loader.main_object.pic:
                     self.base_addr = qemu_base_addr
                     self.rebase = True
 
-                prog = re.compile(r'Trace (.*) \[(?P<addr>.*)\].*')
-                for t in trace.split('\n'):
+                prog = re.compile(br'Trace (.*) \[(?P<addr>.*)\].*')
+                for t in trace.split(b'\n'):
                     m = prog.match(t)
                     if m != None:
                         addr_str = m.group('addr')
@@ -427,7 +427,7 @@ class QEMURunner(Runner):
 
                 # grab the faulting address
                 if self.crash_mode:
-                    self.crash_addr = int(trace.split('\n')[-2].split('[')[1].split(']')[0], 16)
+                    self.crash_addr = int(trace.split(b'\n')[-2].split(b'[')[1].split(b']')[0], 16)
 
 
                 self.trace = addrs
@@ -439,9 +439,9 @@ class QEMURunner(Runner):
             finally:
                 os.remove(logname)
 
-        if self._record_magic:
+        if mname is not None:  # if self._record_magic:
             try:
-                self.magic = open(mname).read()
+                self.magic = open(mname, 'rb').read()
                 a_mesg = "Magic content read from QEMU improper size, should be a page in length"
                 assert len(self.magic) == 0x1000, a_mesg
             except IOError:

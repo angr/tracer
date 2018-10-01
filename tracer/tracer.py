@@ -61,7 +61,7 @@ class Tracer(object):
         self.r = QEMURunner(binary=binary, input=input, seed=seed, argv=argv, project=project)
         p = angr.Project(binary, exclude_sim_procedures_list=exclude_sim_procedures_list)
 
-        for addr, proc in hooks.iteritems():
+        for addr, proc in hooks.items():
             p.hook(addr, proc)
             l.debug("Hooking %#x -> %s...", addr, proc.display_name)
 
@@ -94,8 +94,10 @@ class Tracer(object):
                     chroot=chroot, args=argv)
             if preconstrain_input:
                 s.preconstrainer.preconstrain_file(input, s.posix.stdin, True)
+        else:
+            raise ValueError("Can't trace binary for operating system %s" % p.loader.main_object.os)
 
-        self.simgr = p.factory.simgr(s,
+        self.simgr = p.factory.simulation_manager(s,
                                      save_unsat=True,
                                      hierarchy=False,
                                      save_unconstrained=self.r.crash_mode)

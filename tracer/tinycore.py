@@ -112,8 +112,8 @@ class TinyCore(object):
             if len(to_unpack) != 12:
                 break
             name_sz, desc_sz, n_type = struct.unpack("<3I", to_unpack)
-            name_sz_rounded = (((name_sz + (4 - 1)) / 4) * 4)
-            desc_sz_rounded = (((desc_sz + (4 - 1)) / 4) * 4)
+            name_sz_rounded = (((name_sz + (4 - 1)) // 4) * 4)
+            desc_sz_rounded = (((desc_sz + (4 - 1)) // 4) * 4)
             # description size + the rounded name size + header size
             n_size = desc_sz_rounded + name_sz_rounded + 12
 
@@ -125,7 +125,7 @@ class TinyCore(object):
             note_pos += n_size
 
         # prstatus
-        prstatus_list = filter(lambda x: x.n_type == 'NT_PRSTATUS', self.notes)
+        prstatus_list = [x for x in self.notes if x.n_type == 'NT_PRSTATUS']
         if len(prstatus_list) > 1:
             l.warning("multiple prstatus")
         if len(prstatus_list) == 0:
@@ -185,7 +185,7 @@ class TinyCore(object):
         pos += arch_bytes * 2
 
         # parse out general purpose registers
-        rnames = ['ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp', 'eax', 'ds', 'es', 'fs', 'gs', 'xxx', 'eip', \
+        rnames = ['ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp', 'eax', 'ds', 'es', 'fs', 'gs', 'xxx', 'eip',
                   'cs', 'eflags', 'esp', 'ss']
         nreg = 17
 

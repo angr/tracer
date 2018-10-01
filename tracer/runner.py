@@ -1,11 +1,9 @@
-import os
 import logging
 
 import angr
 
-from .tracerpov import TracerPoV
-
 l = logging.getLogger("angr.misc.tracer.runner")
+MULTICB_AVAILABLE = True
 
 class RunnerEnvironmentError(Exception):
     pass
@@ -35,10 +33,10 @@ class Runner(object):
         self.is_multicb = False
 
         if project is None:
-            if isinstance(binary, basestring):
+            if isinstance(binary, str):
                 self._binaries = [binary]
             elif isinstance(binary, (list, tuple)):
-                if not multicb_available:
+                if not MULTICB_AVAILABLE:
                     raise ValueError("Multicb tracing is disabled")
                 self.is_multicb = True
                 self._binaries = binary
