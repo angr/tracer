@@ -7,13 +7,15 @@ import logging
 import resource
 import tempfile
 import re
-import subprocess32 as subprocess
 import contextlib
 import docker
+
 from os import remove, path
 import tarfile
 from tempfile import NamedTemporaryFile
-from io import DEFAULT_BUFFER_SIZE
+from base64 import b64decode
+
+from io import BufferedRWPair, DEFAULT_BUFFER_SIZE
 l = logging.getLogger("tracer.qemu_runner")
 
 import angr
@@ -84,6 +86,8 @@ class DockerQEMURunner(Runner):
                                          "or a image id")
 
         self.docker_qemu_base_path = self.get_qemu_base_path()
+        self._docker_trace_source_path = None
+
         self.tmout = False
         self._record_magic = record_magic and self.os == 'cgc'
 
@@ -214,9 +218,20 @@ class DockerQEMURunner(Runner):
             result = False
             with open(archive, "rb") as fp:
                 result = self._container.put_archive(dest, fp)
+
+                self._container.exec_run('bzip2 -dk {}/{}'.format(dest, archive))
             remove(archive)
             return result
         return False
+
+    def copy_from_container(self, src, dest):
+        """Method to copy file from container to local filesystem"""
+        err, out = self._container.exec_run('base64 ' + src)
+        if not err:
+            with open(dest, 'wb') as fp:
+                fp.write(b64decode(out))
+
+        return err == 0
 
     def _check_qemu_install(self):
         """
@@ -249,7 +264,8 @@ class DockerQEMURunner(Runner):
 
         # first check whether qemu is alread
         qemu_bin = self._trace_source_path.split('/')[-1]
-        err_code, _ = self._container.exec_run('ls {}/{}'.format(self.docker_qemu_base_path, qemu_bin))
+        self._docker_trace_source_path ='{}/{}'.format(self.docker_qemu_base_path, qemu_bin)
+        err_code, _ = self._container.exec_run('ls ' + self._docker_trace_source_path)
         if err_code != 0:
             succ = self.copy_to_container(self._trace_source_path, self.docker_qemu_base_path)
             assert succ, "Unable to move QEMU executable in the contasiner"
@@ -290,6 +306,9 @@ class DockerQEMURunner(Runner):
 
     def _run(self, stdout_file=None):
         with self._setup_env() as (tmpdir, binary_replacement_fname):
+            self._container.exec_run('mkdir -p ' + tmpdir)
+            [self.copy_to_container(fn, tmpdir) for fn in binary_replacement_fname]
+
             # get the dynamic trace
             self._run_trace(stdout_file=stdout_file)
 
@@ -346,29 +365,16 @@ class DockerQEMURunner(Runner):
 
             stderr_f = open(stderr_file, 'wb')
 
-            p = None
-            try:
-                """
-                p = subprocess.Popen(args, stdin=subprocess.PIPE,
-                                     stdout=stdout_f,
-                                     stderr=stderr_f, close_fds=True,
-                                     preexec_fn=self.__get_rlimit_func())
-
-                _, _ = p.communicate(self.input, timeout=self.trace_timeout)
-
-                ret = p.wait(timeout=self.trace_timeout)
-                """
-
-                # TODO close_fds and set rlimit
-                docker_args = ['timeout', self.trace_timeout, 'sh', '-c', 'echo -n {} | {}'.format(self.input, args)]
-                ret, stdout_f = self._container.exec_run(docker_args)
-
-            except subprocess.TimeoutExpired:
-                if p != None:
-                    p.terminate()
-                    self.tmout = True
-
-            self.returncode = p.returncode
+            # TODO close_fds and set rlimit
+            docker_args = ['timeout', str(self.trace_timeout),
+                           'sh', '-c', 'echo -n "{}" | {}'.format(self.input.decode(), ' '.join(args))]
+            self.returncode, out = self._container.exec_run(docker_args)
+            if self.returncode == 0 and stdout_file is not None:
+                stdout_f.write(str(out))
+            else:
+                if 'starting container process caused' in out:
+                    out = out.split('starting container process caused ')[1:][0]
+                stderr_f.write(out)
 
             if stdout_file is not None:
                 stdout_f.close()
@@ -386,7 +392,7 @@ class DockerQEMURunner(Runner):
 
     def _run_singlecb_trace(self, stdout_file=None):
         logname = tempfile.mktemp(dir="/dev/shm/", prefix="tracer-log-")
-        args = [self._trace_source_path]
+        args = [self._docker_trace_source_path]
 
         if self._seed is not None:
             args.append("-seed")
@@ -422,50 +428,46 @@ class DockerQEMURunner(Runner):
             if stdout_file is not None:
                 stdout_f = open(stdout_file, 'wb')
 
-            p = None
-            try:
-                # we assume qemu with always exit and won't block
-                if type(self.input) is bytes:
-                    l.debug("Tracing as raw input")
-                    l.debug(" ".join(args))
-                    p = subprocess.Popen(args, stdin=subprocess.PIPE,
-                                         stdout=stdout_f, stderr=devnull,
-                                         preexec_fn=self.__get_rlimit_func())
+            # we assume qemu with always exit and won't block
+            if type(self.input) is bytes:
+                l.debug("Tracing as raw input")
+                l.debug(" ".join(args))
 
-                    _, _ = p.communicate(self.input, timeout=self.trace_timeout)
-                else:
-                    l.debug("Tracing as pov file")
-                    in_s, out_s = socket.socketpair()
-                    p = subprocess.Popen(args, stdin=in_s, stdout=stdout_f,
-                                         stderr=devnull,
-                                         preexec_fn=self.__get_rlimit_func())
+                # TODO close_fds and set rlimit
+                docker_args = ['timeout', str(self.trace_timeout),
+                               'sh', '-c', 'echo -n "{}" | {}'.format(self.input.decode(), ' '.join(args))]
+                self.returncode, out = self._container.exec_run(docker_args)
+                if self.returncode == 0:
+                    stdout_f.write(out)
+            else:
+                """
+                in_s, out_s = socket.socketpair()
+                p = subprocess.Popen(args, stdin=in_s, stdout=stdout_f,
+                                     stderr=devnull,
+                                     preexec_fn=self.__get_rlimit_func())
 
-                    for write in self.input.writes:
-                        out_s.send(write)
-                        time.sleep(.01)
+                for write in self.input.writes:
+                    out_s.send(write)
+                    time.sleep(.01)
+                """
 
-                ret = p.wait(timeout=self.trace_timeout)
+                l.debug("Tracing as pov file")
+                raise NotImplementedError("Tracing as pov file: not yet implmeneted.")
 
-                # did a crash occur?
-                if ret < 0:
-                    if abs(ret) == signal.SIGSEGV or abs(ret) == signal.SIGILL:
-                        l.info("Input caused a crash (signal %d) during dynamic tracing", abs(ret))
-                        l.debug(repr(self.input))
-                        l.debug("Crash mode is set")
-                        self.crash_mode = True
-
-            except subprocess.TimeoutExpired:
-                if p is not None:
-                    p.terminate()
-                    self.tmout = True
-
-            self.returncode = p.returncode
+            # did a crash occur?
+            if self.returncode != 0:
+                if abs(self.returncode) == signal.SIGSEGV or abs(self.returncode) == signal.SIGILL:
+                    l.info("Input caused a crash (signal %d) during dynamic tracing", abs(self.returncode))
+                    l.debug(repr(self.input))
+                    l.debug("Crash mode is set")
+                    self.crash_mode = True
 
             if stdout_file is not None:
                 stdout_f.close()
 
         if self._record_trace:
             try:
+                self.copy_from_container(logname, logname)
                 trace = open(logname, 'rb').read()
                 addrs = []
 
