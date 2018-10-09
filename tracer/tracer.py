@@ -15,7 +15,7 @@ class Tracer(object):
                  hooks=None, seed=None, preconstrain_input=True,
                  preconstrain_flag=True, resiliency=True, chroot=None,
                  add_options=None, remove_options=None, trim_history=True,
-                 project=None, dump_syscall=False, dump_cache=True,
+                 project=None, dump_cache=True,
                  max_size = None, exclude_sim_procedures_list=None,
                  argv=None, keep_predecessors=1):
         """
@@ -33,7 +33,6 @@ class Tracer(object):
         :param remove_options             : Remove options from the state which is used to do tracing.
         :param trim_history               : Trim the history of a path.
         :param project                    : The original project.
-        :param dump_syscall               : True if we want to dump the syscall information.
         :param max_size                   : Optionally set max size of input. Defaults to size of preconstrained input.
         :param exclude_sim_procedures_list: What SimProcedures to hook or not at load time. Defaults to
                                             ["malloc","free","calloc","realloc"].
@@ -43,7 +42,7 @@ class Tracer(object):
                                             must be greater than 0.
         """
 
-        l.warning("Tracer package is deprecated, please use Tracer and CrashMonitor exploration techniques instead.")
+        l.warning("Tracer package is deprecated, please use Tracer exploration technique instead.")
 
         if pov_file is not None and input is not None:
             raise ValueError("Cannot specify both a pov_file and an input.")
@@ -101,18 +100,13 @@ class Tracer(object):
                                      save_unsat=True,
                                      hierarchy=False,
                                      save_unconstrained=self.r.crash_mode)
-        self.t = angr.exploration_techniques.Tracer(
+        self.t = self.simgr.use_technique(
+            angr.exploration_techniques.Tracer(
                 trace=self.r.trace,
                 resiliency=resiliency,
-                dump_syscall=dump_syscall,
-                keep_predecessors=keep_predecessors)
-
-        if self.r.crash_mode:
-            self.c = angr.exploration_techniques.CrashMonitor(
-                    trace=self.r.trace,
-                    crash_addr=self.r.crash_addr)
-            self.simgr.use_technique(self.c)
-        self.simgr.use_technique(self.t)
+                keep_predecessors=keep_predecessors,
+                crash_addr=r.crash_addr)
+        )
 
         self.simgr.use_technique(angr.exploration_techniques.Oppologist())
 
