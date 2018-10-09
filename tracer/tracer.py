@@ -105,7 +105,7 @@ class Tracer(object):
                 trace=self.r.trace,
                 resiliency=resiliency,
                 keep_predecessors=keep_predecessors,
-                crash_addr=r.crash_addr)
+                crash_addr=self.r.crash_addr)
         )
 
         self.simgr.use_technique(angr.exploration_techniques.Oppologist())
