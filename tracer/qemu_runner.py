@@ -332,6 +332,9 @@ class QEMURunner(Runner):
         logname = tempfile.mktemp(dir="/dev/shm/", prefix="tracer-log-")
         args = [self._trace_source_path]
 
+        if self._bitflip:
+            args.append("-bitflip")
+
         if self._seed is not None:
             args.append("-seed")
             args.append(str(self._seed))
