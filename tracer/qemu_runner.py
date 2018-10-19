@@ -19,8 +19,8 @@ from .runner import Runner, RunnerEnvironmentError
 
 try:
     import shellphish_qemu
-except ImportError:
-    raise ImportError("Unable to import shellphish_qemu, which is required by QEMURunner. Please install it before proceeding.")
+except ImportError as e:
+    raise ImportError("Unable to import shellphish_qemu, which is required by QEMURunner. Please install it before proceeding.") from e
 
 
 try:
@@ -38,7 +38,7 @@ class QEMURunner(Runner):
 
     def __init__(self, binary=None, input=None, project=None, record_trace=True, record_stdout=False,
                  record_magic=True, record_core=False, seed=None, memory_limit="8G", bitflip=False, report_bad_args=False,
-                 use_tiny_core=False, max_size=None, qemu=None, argv=None,
+                 use_tiny_core=False, max_size=None, qemu=None, argv=None, library_path=None, ld_linux=None,
                  trace_log_limit=2**30, trace_timeout=10):
         """
         :param binary        : Path to the binary to be traced.
@@ -68,6 +68,11 @@ class QEMURunner(Runner):
 
         self.tmout = False
         self._record_magic = record_magic and self.os == 'cgc'
+
+        if type(library_path) is str:
+            library_path = [library_path]
+        self._library_path = library_path
+        self._ld_linux = ld_linux
 
         if record_trace and self.is_multicb:
             l.warning("record_trace specified with multicb, no trace will be recorded")
@@ -114,7 +119,7 @@ class QEMURunner(Runner):
         self.magic = None
 
         if record_stdout:
-            tmp = tempfile.mktemp(prefix="stdout_" + os.path.basename(binary))
+            tmp = tempfile.mktemp(prefix="stdout_" + os.path.basename(self._p.filename))
             # will set crash_mode correctly
             self._run(stdout_file=tmp)
             with open(tmp, "rb") as f:
@@ -327,6 +332,9 @@ class QEMURunner(Runner):
         logname = tempfile.mktemp(dir="/dev/shm/", prefix="tracer-log-")
         args = [self._trace_source_path]
 
+        if self._bitflip:
+            args.append("-bitflip")
+
         if self._seed is not None:
             args.append("-seed")
             args.append(str(self._seed))
@@ -347,16 +355,20 @@ class QEMURunner(Runner):
         if self._report_bad_args:
             args += ["-report_bad_args"]
 
+        if 'cgc' not in self._trace_source_path:
+            args += ['-E', 'LD_BIND_NOW=1']
+
+        if self._library_path:
+            args += ['-E', 'LD_LIBRARY_PATH=' + ':'.join(self._library_path)]
+
         # Memory limit option is only available in shellphish-qemu-cgc-*
         if 'cgc' in self._trace_source_path:
             args += ["-m", self._memory_limit]
 
+        if self._ld_linux:
+            args.append(self._ld_linux)
+
         args += self.argv or [self._binaries[0]]
-        
-        if self._bitflip:
-            args = [args[0]] + ["-bitflip"] + args[1:]
-
-
 
         with open('/dev/null', 'wb') as devnull:
             stdout_f = devnull
@@ -433,9 +445,9 @@ class QEMURunner(Runner):
                 self.trace = addrs
                 l.debug("Trace consists of %d basic blocks", len(self.trace))
             except IndexError:
-                l.warning("""One trace is found to be malformated,
-                it is possible that the log file size exceeds the 1G limit,
-                meaning that there might be infinite loops in the target program""")
+                l.warning("The trace is found to be malformed. "
+                "it is possible that the log file size exceeds the 1G limit, "
+                "meaning that there might be infinite loops in the target program.")
             finally:
                 os.remove(logname)
 
