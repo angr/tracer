@@ -40,7 +40,7 @@ class QEMURunner(Runner):
         self, binary=None, input=None, project=None, record_trace=True, record_stdout=False,
         record_magic=True, record_core=False, seed=None, memory_limit="8G", bitflip=False, report_bad_args=False,
         use_tiny_core=False, max_size=None, qemu=None, argv=None, library_path=None, ld_linux=None,
-        trace_log_limit=2**30, trace_timeout=10
+        trace_log_limit=2**30, trace_timeout=10, exec_func=None
     ): #pylint:disable=redefined-builtin
         """
         :param binary        : Path to the binary to be traced.
@@ -59,8 +59,9 @@ class QEMURunner(Runner):
                                Defaults to binary name with no params.
         :param trace_log_limit: Optionally specify the dynamic trace log file
             size limit in bytes, defaults to 1G.
-        :param trace_timeout  : Optionally specify the dymamic time limit in seconds
+        :param trace_timeout : Optionally specify the dymamic time limit in seconds
             defaults to 10 seconds.
+        :param exec_func     : Optional function to run instead of self._exec_func.
         """
         if type(input) not in (bytes, TracerPoV):
             raise RunnerEnvironmentError("Input for tracing should be either a bytestring or a TracerPoV for CGC PoV file.")
@@ -120,6 +121,9 @@ class QEMURunner(Runner):
         # We need this to keep symbolic traces following the same path
         # as their dynamic counterpart
         self.magic = None
+
+        if exec_func:
+            self._exec_func = exec_func
 
         if record_stdout:
             tmp = tempfile.mktemp(prefix="stdout_" + os.path.basename(self._p.filename))
@@ -281,6 +285,15 @@ class QEMURunner(Runner):
 
         return set_fsize
 
+    def _exec_func(self, args, stdin=None, stdout=None, stderr=None): #pylint:disable=method-hidden
+        #pylint:disable=subprocess-popen-preexec-fn
+        return subprocess.Popen(
+            args,
+            stdin=stdin, stdout=stdout, stderr=stderr,
+            preexec_fn=self.__get_rlimit_func()
+        )
+
+
     def _run_multicb_trace(self, stdout_file=None):
         args = [self._fakeforksrv_path]
         args += self._binaries
@@ -299,16 +312,9 @@ class QEMURunner(Runner):
 
         p = None
         try:
-            p = subprocess.Popen( #pylint:disable=subprocess-popen-preexec-fn
-                args,
-                stdin=subprocess.PIPE, stdout=stdout_f, stderr=stderr_f,
-                close_fds=True, preexec_fn=self.__get_rlimit_func()
-            )
-
-            _, _ = p.communicate(self.input, timeout=self.trace_timeout)
-
+            p = self._exec_func(args, stdin=subprocess.PIPE, stdout=stdout_f, stderr=stderr_f)
+            p.communicate(self.input, timeout=self.trace_timeout)
             p.wait(timeout=self.trace_timeout)
-
         except subprocess.TimeoutExpired:
             if p is not None:
                 p.terminate()
@@ -382,20 +388,18 @@ class QEMURunner(Runner):
             if type(self.input) is bytes:
                 l.debug("Tracing as raw input")
                 l.debug(" ".join(args))
-                p = subprocess.Popen( #pylint:disable=subprocess-popen-preexec-fn
+                p = self._exec_func(
                     args,
                     stdin=subprocess.PIPE, stdout=stdout_f, stderr=subprocess.DEVNULL,
-                    preexec_fn=self.__get_rlimit_func()
                 )
 
                 _, _ = p.communicate(self.input, timeout=self.trace_timeout)
             else:
                 l.debug("Tracing as pov file")
                 in_s, out_s = socket.socketpair()
-                p = subprocess.Popen( #pylint:disable=subprocess-popen-preexec-fn
+                p = self._exec_func(
                     args,
                     stdin=in_s, stdout=stdout_f, stderr=subprocess.DEVNULL,
-                    preexec_fn=self.__get_rlimit_func()
                 )
 
                 for write in self.input.writes:
