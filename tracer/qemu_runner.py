@@ -36,10 +36,12 @@ class QEMURunner(Runner):
     Trace an angr path with a concrete input using QEMU.
     """
 
-    def __init__(self, binary=None, input=None, project=None, record_trace=True, record_stdout=False,
-                 record_magic=True, record_core=False, seed=None, memory_limit="8G", bitflip=False, report_bad_args=False,
-                 use_tiny_core=False, max_size=None, qemu=None, argv=None, library_path=None, ld_linux=None,
-                 trace_log_limit=2**30, trace_timeout=10):
+    def __init__(
+        self, binary=None, input=None, project=None, record_trace=True, record_stdout=False,
+        record_magic=True, record_core=False, seed=None, memory_limit="8G", bitflip=False, report_bad_args=False,
+        use_tiny_core=False, max_size=None, qemu=None, argv=None, library_path=None, ld_linux=None,
+        trace_log_limit=2**30, trace_timeout=10
+    ): #pylint:disable=redefined-builtin
         """
         :param binary        : Path to the binary to be traced.
         :param input         : Concrete input to feed to binary (string or CGC TracerPoV).
@@ -67,6 +69,7 @@ class QEMURunner(Runner):
                         record_core=record_core, use_tiny_core=use_tiny_core, trace_source_path=qemu, argv=argv)
 
         self.tmout = False
+        self.returncode = None
         self._record_magic = record_magic and self.os == 'cgc'
 
         if type(library_path) is str:
@@ -181,14 +184,12 @@ class QEMURunner(Runner):
         if self.os == "cgc":
             suffix = "tracer" if self._record_trace else "base"
             self.trace_source = "shellphish-qemu-cgc-%s" % suffix
-            qemu_platform = "cgc-%s" % suffix
         else:
             self.trace_source = "shellphish-qemu-linux-%s" % self._p.arch.qemu_name
-            qemu_platform = self._p.arch.qemu_name
 
         if self._trace_source_path is None or not os.access(self._trace_source_path, os.X_OK):
             if self._trace_source_path is not None:
-                l.warning("Problem accessing forced %s. Using our default %s.") % (self._trace_source_path, self.trace_source)
+                l.warning("Problem accessing forced %s. Using our default %s.", self._trace_source_path, self.trace_source)
 
             self._trace_source_path = shellphish_qemu.qemu_path(self.trace_source)
 
@@ -239,7 +240,7 @@ class QEMURunner(Runner):
             self._binaries = binaries_old
 
     def _run(self, stdout_file=None):
-        with self._setup_env() as (tmpdir,binary_replacement_fname):
+        with self._setup_env() as (_,binary_replacement_fname):
             # get the dynamic trace
             self._run_trace(stdout_file=stdout_file)
 
@@ -298,7 +299,7 @@ class QEMURunner(Runner):
 
         p = None
         try:
-            p = subprocess.Popen(
+            p = subprocess.Popen( #pylint:disable=subprocess-popen-preexec-fn
                 args,
                 stdin=subprocess.PIPE, stdout=stdout_f, stderr=stderr_f,
                 close_fds=True, preexec_fn=self.__get_rlimit_func()
@@ -306,10 +307,10 @@ class QEMURunner(Runner):
 
             _, _ = p.communicate(self.input, timeout=self.trace_timeout)
 
-            ret = p.wait(timeout=self.trace_timeout)
+            p.wait(timeout=self.trace_timeout)
 
         except subprocess.TimeoutExpired:
-            if p != None:
+            if p is not None:
                 p.terminate()
                 self.tmout = True
 
@@ -381,7 +382,7 @@ class QEMURunner(Runner):
             if type(self.input) is bytes:
                 l.debug("Tracing as raw input")
                 l.debug(" ".join(args))
-                p = subprocess.Popen(
+                p = subprocess.Popen( #pylint:disable=subprocess-popen-preexec-fn
                     args,
                     stdin=subprocess.PIPE, stdout=stdout_f, stderr=subprocess.DEVNULL,
                     preexec_fn=self.__get_rlimit_func()
@@ -391,7 +392,7 @@ class QEMURunner(Runner):
             else:
                 l.debug("Tracing as pov file")
                 in_s, out_s = socket.socketpair()
-                p = subprocess.Popen(
+                p = subprocess.Popen( #pylint:disable=subprocess-popen-preexec-fn
                     args,
                     stdin=in_s, stdout=stdout_f, stderr=subprocess.DEVNULL,
                     preexec_fn=self.__get_rlimit_func()
@@ -435,7 +436,7 @@ class QEMURunner(Runner):
                 prog = re.compile(br'Trace (.*) \[(?P<addr>.*)\].*')
                 for t in trace.split(b'\n'):
                     m = prog.match(t)
-                    if m != None:
+                    if m is not None:
                         addr_str = m.group('addr')
                         addrs.append(int(addr_str, base=16))
                     else:
