@@ -1,14 +1,14 @@
-import os
-import time
+import subprocess
+import contextlib
+import resource
+import tempfile
+import logging
 import shutil
 import signal
 import socket
-import logging
-import resource
-import tempfile
+import time
+import os
 import re
-import subprocess32 as subprocess
-import contextlib
 
 l = logging.getLogger("tracer.qemu_runner")
 
@@ -287,37 +287,38 @@ class QEMURunner(Runner):
         stderr_file = tempfile.mktemp(dir="/dev/shm/", prefix="tracer-multicb-stderr-")
 
         saved_afl_path = os.environ.get('AFL_PATH', None)
-        with open('/dev/null', 'wb') as devnull:
-            os.environ['AFL_PATH'] = shellphish_afl.afl_dir('multi-cgc')
 
-            stdout_f = devnull
-            if stdout_file is not None:
-                stdout_f = open(stdout_file, 'wb')
+        os.environ['AFL_PATH'] = shellphish_afl.afl_dir('multi-cgc')
 
-            stderr_f = open(stderr_file, 'wb')
+        stdout_f = subprocess.DEVNULL
+        if stdout_file is not None:
+            stdout_f = open(stdout_file, 'wb')
 
-            p = None
-            try:
-                p = subprocess.Popen(args, stdin=subprocess.PIPE,
-                                       stdout=stdout_f,
-                                       stderr=stderr_f, close_fds=True,
-                                       preexec_fn=self.__get_rlimit_func())
+        stderr_f = open(stderr_file, 'wb')
 
-                _, _ = p.communicate(self.input, timeout=self.trace_timeout)
+        p = None
+        try:
+            p = subprocess.Popen(
+                args,
+                stdin=subprocess.PIPE, stdout=stdout_f, stderr=stderr_f,
+                close_fds=True, preexec_fn=self.__get_rlimit_func()
+            )
 
-                ret = p.wait(timeout=self.trace_timeout)
+            _, _ = p.communicate(self.input, timeout=self.trace_timeout)
 
-            except subprocess.TimeoutExpired:
-                if p != None:
-                    p.terminate()
-                    self.tmout = True
+            ret = p.wait(timeout=self.trace_timeout)
 
-            self.returncode = p.returncode
+        except subprocess.TimeoutExpired:
+            if p != None:
+                p.terminate()
+                self.tmout = True
 
-            if stdout_file is not None:
-                stdout_f.close()
+        self.returncode = p.returncode
 
-            stderr_f.close()
+        if stdout_file is not None:
+            stdout_f.close()
+
+        stderr_f.close()
 
         if saved_afl_path:
             os.environ['AFL_PATH'] = saved_afl_path
@@ -370,52 +371,55 @@ class QEMURunner(Runner):
 
         args += self.argv or [self._binaries[0]]
 
-        with open('/dev/null', 'wb') as devnull:
-            stdout_f = devnull
-            if stdout_file is not None:
-                stdout_f = open(stdout_file, 'wb')
+        stdout_f = subprocess.DEVNULL
+        if stdout_file is not None:
+            stdout_f = open(stdout_file, 'wb')
 
-            p = None
-            try:
-                # we assume qemu with always exit and won't block
-                if type(self.input) is bytes:
-                    l.debug("Tracing as raw input")
-                    l.debug(" ".join(args))
-                    p = subprocess.Popen(args, stdin=subprocess.PIPE,
-                                           stdout=stdout_f, stderr=devnull,
-                                           preexec_fn=self.__get_rlimit_func())
+        p = None
+        try:
+            # we assume qemu with always exit and won't block
+            if type(self.input) is bytes:
+                l.debug("Tracing as raw input")
+                l.debug(" ".join(args))
+                p = subprocess.Popen(
+                    args,
+                    stdin=subprocess.PIPE, stdout=stdout_f, stderr=subprocess.DEVNULL,
+                    preexec_fn=self.__get_rlimit_func()
+                )
 
-                    _, _ = p.communicate(self.input, timeout=self.trace_timeout)
-                else:
-                    l.debug("Tracing as pov file")
-                    in_s, out_s = socket.socketpair()
-                    p = subprocess.Popen(args, stdin=in_s, stdout=stdout_f,
-                                           stderr=devnull,
-                                           preexec_fn=self.__get_rlimit_func())
+                _, _ = p.communicate(self.input, timeout=self.trace_timeout)
+            else:
+                l.debug("Tracing as pov file")
+                in_s, out_s = socket.socketpair()
+                p = subprocess.Popen(
+                    args,
+                    stdin=in_s, stdout=stdout_f, stderr=subprocess.DEVNULL,
+                    preexec_fn=self.__get_rlimit_func()
+                )
 
-                    for write in self.input.writes:
-                        out_s.send(write)
-                        time.sleep(.01)
+                for write in self.input.writes:
+                    out_s.send(write)
+                    time.sleep(.01)
 
-                ret = p.wait(timeout=self.trace_timeout)
+            ret = p.wait(timeout=self.trace_timeout)
 
-                # did a crash occur?
-                if ret < 0:
-                    if abs(ret) == signal.SIGSEGV or abs(ret) == signal.SIGILL:
-                        l.info("Input caused a crash (signal %d) during dynamic tracing", abs(ret))
-                        l.debug(repr(self.input))
-                        l.debug("Crash mode is set")
-                        self.crash_mode = True
+            # did a crash occur?
+            if ret < 0:
+                if abs(ret) == signal.SIGSEGV or abs(ret) == signal.SIGILL:
+                    l.info("Input caused a crash (signal %d) during dynamic tracing", abs(ret))
+                    l.debug(repr(self.input))
+                    l.debug("Crash mode is set")
+                    self.crash_mode = True
 
-            except subprocess.TimeoutExpired:
-                if p is not None:
-                    p.terminate()
-                    self.tmout = True
+        except subprocess.TimeoutExpired:
+            if p is not None:
+                p.terminate()
+                self.tmout = True
 
-            self.returncode = p.returncode
+        self.returncode = p.returncode
 
-            if stdout_file is not None:
-                stdout_f.close()
+        if stdout_file is not None:
+            stdout_f.close()
 
         if self._record_trace:
             try:
