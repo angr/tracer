@@ -23,14 +23,6 @@ except ImportError as e:
     raise ImportError("Unable to import shellphish_qemu, which is required by QEMURunner. Please install it before proceeding.") from e
 
 
-try:
-    import shellphish_afl
-    MULTICB_AVAILABLE = True
-except ImportError:
-    l.warning("Unable to import shellphish_afl, multicb tracing will be disabled")
-    shellphish_afl = None
-    MULTICB_AVAILABLE = False
-
 class QEMURunner(Runner):
     """
     Trace an angr path with a concrete input using QEMU.
@@ -78,17 +70,11 @@ class QEMURunner(Runner):
         self._library_path = library_path
         self._ld_linux = ld_linux
 
-        if record_trace and self.is_multicb:
-            l.warning("record_trace specified with multicb, no trace will be recorded")
-
         if isinstance(seed, int):
             seed = str(seed)
         self._seed = seed
         self._memory_limit = memory_limit
         self._bitflip = bitflip
-
-        if self._bitflip and self.is_multicb:
-            raise ValueError("Cannot perform bitflip with MultiCB")
 
         self._report_bad_args = report_bad_args
 
@@ -108,9 +94,6 @@ class QEMURunner(Runner):
 
         self.trace_log_limit = trace_log_limit
         self.trace_timeout = trace_timeout
-        if self.is_multicb:
-            self._fakeforksrv_path = os.path.join(shellphish_afl.afl_dir('multi-cgc'), "run_via_fakeforksrv")
-
         self._setup()
 
         l.debug("Accumulating basic block trace...")
@@ -165,12 +148,6 @@ class QEMURunner(Runner):
                     error_msg = "\"%s\" binary does not exist" % binary
                     l.error(error_msg)
                     raise RunnerEnvironmentError(error_msg)
-
-        if self.is_multicb:
-            if not os.access(self._fakeforksrv_path, os.X_OK):
-                error_msg = "fakeforksrv path %s is not executable" % self._fakeforksrv_path
-                l.error(error_msg)
-                raise RunnerEnvironmentError(error_msg)
 
         # hack for the OS
         if self.os != 'cgc' and not self.os.startswith("UNIX"):
@@ -231,7 +208,7 @@ class QEMURunner(Runner):
             shutil.copy(binary_o, binary_r)
 
         self._binaries = binary_replacements
-        if self.argv is not None and not self.is_multicb:
+        if self.argv is not None:
             self.argv = self._binaries + self.argv[1:]
         os.chdir(tmpdir)
         try:
@@ -271,12 +248,6 @@ class QEMURunner(Runner):
                 else:
                     self._load_core_values(core_file)
 
-    def _run_trace(self, stdout_file=None):
-        if self.is_multicb:
-            self._run_multicb_trace(stdout_file)
-        else:
-            self._run_singlecb_trace(stdout_file)
-
     def __get_rlimit_func(self):
         def set_fsize():
             # here we limit the logsize
@@ -285,7 +256,7 @@ class QEMURunner(Runner):
 
         return set_fsize
 
-    def _exec_func(self, args, stdin=None, stdout=None, stderr=None): #pylint:disable=method-hidden
+    def _exec_func(self, args, stdin=None, stdout=None, stderr=None, tracefile=None, magicfile=None): #pylint:disable=method-hidden,unused-argument
         #pylint:disable=subprocess-popen-preexec-fn
         r = { }
         r['process'] = subprocess.Popen(
@@ -295,50 +266,7 @@ class QEMURunner(Runner):
         )
         return r
 
-    def _run_multicb_trace(self, stdout_file=None):
-        args = [self._fakeforksrv_path]
-        args += self._binaries
-
-        stderr_file = tempfile.mktemp(dir="/dev/shm/", prefix="tracer-multicb-stderr-")
-
-        saved_afl_path = os.environ.get('AFL_PATH', None)
-
-        os.environ['AFL_PATH'] = shellphish_afl.afl_dir('multi-cgc')
-
-        stdout_f = subprocess.DEVNULL
-        if stdout_file is not None:
-            stdout_f = open(stdout_file, 'wb')
-
-        stderr_f = open(stderr_file, 'wb')
-
-        p = None
-        try:
-            exec_details = self._exec_func(args, stdin=subprocess.PIPE, stdout=stdout_f, stderr=stderr_f)
-            p = exec_details['process']
-            p.communicate(self.input, timeout=self.trace_timeout)
-            p.wait(timeout=self.trace_timeout)
-        except subprocess.TimeoutExpired:
-            if p is not None:
-                p.terminate()
-                self.tmout = True
-
-        self.returncode = p.returncode
-
-        if stdout_file is not None:
-            stdout_f.close()
-
-        stderr_f.close()
-
-        if saved_afl_path:
-            os.environ['AFL_PATH'] = saved_afl_path
-
-        with open(stderr_file, 'rb') as f:
-            buf = f.read()
-            for line in buf.split(b"\n"):
-                if b"signaled" in line:
-                    self.crash_mode = bool(int(line.split(b":")[-1]))
-
-    def _run_singlecb_trace(self, stdout_file=None):
+    def _run_trace(self, stdout_file=None):
         logname = tempfile.mktemp(dir="/dev/shm/", prefix="tracer-log-")
         args = [self._trace_source_path]
 
