@@ -377,7 +377,7 @@ class QEMURunner(Runner):
 
             p = None
             try:
-                # we assume qemu with always exit and won't block
+                # we assume qemu will always exit and won't block
                 if type(self.input) is bytes:
                     l.debug("Tracing as raw input")
                     l.debug(" ".join(args))
