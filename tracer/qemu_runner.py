@@ -287,12 +287,13 @@ class QEMURunner(Runner):
 
     def _exec_func(self, args, stdin=None, stdout=None, stderr=None): #pylint:disable=method-hidden
         #pylint:disable=subprocess-popen-preexec-fn
-        return subprocess.Popen(
+        r = { }
+        r['process'] = subprocess.Popen(
             args,
             stdin=stdin, stdout=stdout, stderr=stderr,
             preexec_fn=self.__get_rlimit_func()
         )
-
+        return r
 
     def _run_multicb_trace(self, stdout_file=None):
         args = [self._fakeforksrv_path]
@@ -312,7 +313,8 @@ class QEMURunner(Runner):
 
         p = None
         try:
-            p = self._exec_func(args, stdin=subprocess.PIPE, stdout=stdout_f, stderr=stderr_f)
+            exec_details = self._exec_func(args, stdin=subprocess.PIPE, stdout=stdout_f, stderr=stderr_f)
+            p = exec_details['process']
             p.communicate(self.input, timeout=self.trace_timeout)
             p.wait(timeout=self.trace_timeout)
         except subprocess.TimeoutExpired:
@@ -388,19 +390,20 @@ class QEMURunner(Runner):
             if type(self.input) is bytes:
                 l.debug("Tracing as raw input")
                 l.debug(" ".join(args))
-                p = self._exec_func(
+                exec_details = self._exec_func(
                     args,
                     stdin=subprocess.PIPE, stdout=stdout_f, stderr=subprocess.DEVNULL,
                 )
-
-                _, _ = p.communicate(self.input, timeout=self.trace_timeout)
+                p = exec_details['process']
+                p.communicate(self.input, timeout=self.trace_timeout)
             else:
                 l.debug("Tracing as pov file")
                 in_s, out_s = socket.socketpair()
-                p = self._exec_func(
+                exec_details = self._exec_func(
                     args,
                     stdin=in_s, stdout=stdout_f, stderr=subprocess.DEVNULL,
                 )
+                p = exec_details['process']
 
                 for write in self.input.writes:
                     out_s.send(write)
