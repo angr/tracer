@@ -1,5 +1,4 @@
-from .runner import Runner, RunnerEnvironmentError
-from .qemu_runner import QEMURunner
+from .qemu_runner import QEMURunner, RunnerEnvironmentError
 from .tracerpov import TracerPoV
 from .tinycore import TinyCore
 from .tracer import *

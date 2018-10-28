@@ -3,27 +3,30 @@ import contextlib
 import resource
 import tempfile
 import logging
-import shutil
 import signal
 import socket
+import shutil
 import time
+import glob
 import os
 import re
+import io
 
 l = logging.getLogger("tracer.qemu_runner")
 
 import angr
 from .tracerpov import TracerPoV
 from .tinycore import TinyCore
-from .runner import Runner, RunnerEnvironmentError
 
 try:
     import shellphish_qemu
 except ImportError as e:
     raise ImportError("Unable to import shellphish_qemu, which is required by QEMURunner. Please install it before proceeding.") from e
 
+class RunnerEnvironmentError(Exception):
+    pass
 
-class QEMURunner(Runner):
+class QEMURunner:
     """
     Trace an angr path with a concrete input using QEMU.
     """
@@ -35,6 +38,7 @@ class QEMURunner(Runner):
         trace_log_limit=2**30, trace_timeout=10, exec_func=None
     ): #pylint:disable=redefined-builtin
         """
+        :param argv             : Optionally specify argv params (i,e,: ['./calc', 'parm1']).
         :param binary        : Path to the binary to be traced.
         :param input         : Concrete input to feed to binary (string or CGC TracerPoV).
         :param project       : The original project.
@@ -44,6 +48,8 @@ class QEMURunner(Runner):
         :param record_core   : Whether or not to record the core file in case of crash.
         :param report_bad_args: Enable CGC QEMU's report bad args option.
         :param use_tiny_core : Use minimal core loading.
+        :param trace_source_path: Path to the trace source to be used.
+                                  Defaults to binary name with no params.
         :param max_size      : Optionally set max size of input. Defaults to size
                                of preconstrained input.
         :param qemu          : Path to QEMU to be forced used.
@@ -55,11 +61,53 @@ class QEMURunner(Runner):
             defaults to 10 seconds.
         :param exec_func     : Optional function to run instead of self._exec_func.
         """
+
+
         if type(input) not in (bytes, TracerPoV):
             raise RunnerEnvironmentError("Input for tracing should be either a bytestring or a TracerPoV for CGC PoV file.")
 
-        Runner.__init__(self, binary=binary, input=input, project=project, record_trace=record_trace,
-                        record_core=record_core, use_tiny_core=use_tiny_core, trace_source_path=qemu, argv=argv)
+        if binary is not None:
+            self._filename = binary
+            self._p = angr.Project(self._filename)
+        elif project is not None:
+            self._p = project
+            self._filename = project.filename
+        else:
+            raise ValueError("Must specify project or binary.")
+
+        # Hack for architecture and OS.
+        self.os = self._p.loader.main_object.os
+        self.base_addr = self._p.loader.main_object.min_addr
+        self.rebase = False
+
+        self.input = input
+
+        self._record_trace = record_trace
+        self._record_core = record_core
+
+        self.argv = argv
+
+        # Basic block trace.
+        self.trace = [ ]
+
+        # In case of crash and record_core is set.
+        self.reg_vals = None
+        self._state = None
+        self.memory = None
+        self._use_tiny_core = use_tiny_core
+
+        self.trace_source = None
+        self._trace_source_path = qemu
+
+        # Does the input cause a crash?
+        self.crash_mode = False
+        # If the input causes a crash, what address does it crash at?
+        self.crash_addr = None
+
+        self.stdout = None
+
+        # compatibility for now
+        self.is_multicb = False
 
         self.tmout = False
         self.returncode = None
@@ -94,7 +142,7 @@ class QEMURunner(Runner):
 
         self.trace_log_limit = trace_log_limit
         self.trace_timeout = trace_timeout
-        self._setup()
+        self.sanity_check()
 
         l.debug("Accumulating basic block trace...")
         l.debug("tracer qemu path: %s", self._trace_source_path)
@@ -122,36 +170,25 @@ class QEMURunner(Runner):
 
 ### SETUP
 
-    @staticmethod
-    def _memory_limit_to_int(ms):
-        if not isinstance(ms, str):
-            raise ValueError("memory_limit must be a string such as \"8G\"")
+    def sanity_check(self):
+        self._check_binary()
+        self._check_qemu_install()
 
-        if ms.endswith('k'):
-            return int(ms[:-1]) * 1024
-        elif ms.endswith('M'):
-            return int(ms[:-1]) * 1024 * 1024
-        elif ms.endswith('G'):
-            return int(ms[:-1]) * 1024 * 1024 * 1024
-
-        raise ValueError("Unrecognized size, should be 'k', 'M', or 'G'")
-
-    def _setup(self):
+    def _check_binary(self):
         # check the binary
-        for binary in self._binaries:
-            if not os.access(binary, os.X_OK):
-                if os.path.isfile(binary):
-                    error_msg = "\"%s\" binary is not executable" % binary
-                    l.error(error_msg)
-                    raise RunnerEnvironmentError(error_msg)
-                else:
-                    error_msg = "\"%s\" binary does not exist" % binary
-                    l.error(error_msg)
-                    raise RunnerEnvironmentError(error_msg)
+        if not os.access(self._filename, os.X_OK):
+            if os.path.isfile(self._filename):
+                error_msg = "\"%s\" binary is not executable" % self._filename
+                l.error(error_msg)
+                raise RunnerEnvironmentError(error_msg)
+            else:
+                error_msg = "\"%s\" binary does not exist" % self._filename
+                l.error(error_msg)
+                raise RunnerEnvironmentError(error_msg)
 
         # hack for the OS
         if self.os != 'cgc' and not self.os.startswith("UNIX"):
-            error_msg = "\"%s\" runs on an OS not supported by the qemu runner (only cgc and elf at the moment)" % self._binaries[0]
+            error_msg = "\"%s\" runs on an OS not supported by the qemu runner (only cgc and elf at the moment)" % self._filename
             l.error(error_msg)
             raise RunnerEnvironmentError(error_msg)
 
@@ -186,180 +223,185 @@ class QEMURunner(Runner):
 
 ### DYNAMIC TRACING
 
-    # create a tmp dir in /dev/shm, chdir into it, set rlimit, save the current self.binary
-    # at the end, it restores everything
-    @contextlib.contextmanager
-    def _setup_env(self):
-        prefix = "/tmp/tracer_"
-        curdir = os.getcwd()
-        tmpdir = tempfile.mkdtemp(prefix=prefix)
-        # allow cores to be dumped
-        saved_limit = resource.getrlimit(resource.RLIMIT_CORE)
-        resource.setrlimit(resource.RLIMIT_CORE, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
-        binaries_old = [ ]
-        for binary in self._binaries:
-            binaries_old.append(binary)
-
-        binary_replacements = [ ]
-        for i, binary in enumerate(self._binaries):
-            binary_replacements.append(os.path.join(tmpdir,"binary_replacement_%d" % i))
-
-        for binary_o, binary_r in zip(binaries_old, binary_replacements):
-            shutil.copy(binary_o, binary_r)
-
-        self._binaries = binary_replacements
-        if self.argv is not None:
-            self.argv = self._binaries + self.argv[1:]
-        os.chdir(tmpdir)
-        try:
-            yield (tmpdir,binary_replacements)
-        finally:
-            assert tmpdir.startswith(prefix)
-            shutil.rmtree(tmpdir)
-            os.chdir(curdir)
-            resource.setrlimit(resource.RLIMIT_CORE, saved_limit)
-            self._binaries = binaries_old
-
-    def _run(self, stdout_file=None):
-        with self._setup_env() as (_,binary_replacement_fname):
-            # get the dynamic trace
-            self._run_trace(stdout_file=stdout_file)
-
-            if self.crash_mode and self._record_core:
-                # find core file
-                binary_common_prefix = "_".join(os.path.basename(binary_replacement_fname[0]).split("_")[:2])
-                unique_prefix = "qemu_{}".format(os.path.basename(binary_common_prefix))
-                core_files = [x for x in os.listdir('.') if x.startswith(unique_prefix) and x.endswith('.core')]
-
-                a_mesg = "No core files found for binary, this shouldn't happen"
-                assert len(core_files) > 0, a_mesg
-                a_mesg = "Multiple core files found for binary, this shouldn't happen"
-                assert len(core_files) < 2, a_mesg
-                core_file = core_files[0]
-
-                # get crashed binary
-                self.crashed_binary = int(core_file.split("_")[3])
-
-                a_mesg = "Empty core file generated"
-                assert os.path.getsize(core_file) > 0, a_mesg
-
-                if self._use_tiny_core:
-                    self._load_tiny_core(core_file)
-                else:
-                    self._load_core_values(core_file)
-
     def __get_rlimit_func(self):
-        def set_fsize():
+        def set_rlimits():
             # here we limit the logsize
-            resource.setrlimit(resource.RLIMIT_FSIZE,
-                               (self.trace_log_limit, self.trace_log_limit))
+            resource.setrlimit(resource.RLIMIT_CORE, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
+            resource.setrlimit(resource.RLIMIT_FSIZE, (self.trace_log_limit, self.trace_log_limit))
 
-        return set_fsize
+        return set_rlimits
 
-    def _exec_func(self, args, stdin=None, stdout=None, stderr=None, tracefile=None, magicfile=None): #pylint:disable=method-hidden,unused-argument
+    @staticmethod
+    @contextlib.contextmanager
+    def _cd_tmpdir():
+        curdir = os.getcwd()
+        tmpdir = tempfile.mkdtemp(prefix="/tmp/tracer_")
+        try:
+            os.chdir(tmpdir)
+            yield tmpdir
+        finally:
+            os.chdir(curdir)
+            try: shutil.rmtree(tmpdir)
+            except FileNotFoundError: pass
+
+    @staticmethod
+    @contextlib.contextmanager
+    def _tmpfile(**kwargs):
+        tmpfile = tempfile.mktemp(**kwargs)
+        try:
+            yield tmpfile
+        finally:
+            try: os.unlink(tmpfile)
+            except FileNotFoundError: pass
+
+    @contextlib.contextmanager
+    def _exec_func(self, qemu_variant, qemu_args, program_args, ld_path=None, stdin=None, stdout=None, stderr=None, record_trace=True, record_magic=False, core_target=None): #pylint:disable=method-hidden
         #pylint:disable=subprocess-popen-preexec-fn
-        r = { }
-        r['process'] = subprocess.Popen(
-            args,
-            stdin=stdin, stdout=stdout, stderr=stderr,
-            preexec_fn=self.__get_rlimit_func()
-        )
+
+        with self._cd_tmpdir() as tmpdir, self._tmpfile(dir="/dev/shm/", prefix="tracer-log-") as trace_filename, self._tmpfile(dir="/dev/shm/", prefix="tracer-magic-") as magic_filename:
+            cmd_args = [ qemu_variant ]
+            cmd_args += qemu_args
+
+            # hardcode an argv[0]
+            #cmd_args += [ "-0", program_args[0] ]
+
+            # record the trace, if we want to
+            if record_trace:
+                trace_filename = tempfile.mktemp(dir="/dev/shm/", prefix="tracer-log-")
+                cmd_args += ["-d", "exec", "-D", trace_filename]
+            else:
+                trace_filename = None
+                cmd_args += ["-enable_double_empty_exiting"]
+
+            # If the binary is CGC we'll also take this opportunity to read in the magic page.
+            if record_magic:
+                magic_filename = tempfile.mktemp(dir="/dev/shm/", prefix="tracer-magic-")
+                cmd_args += ["-magicdump", magic_filename]
+            else:
+                magic_filename = None
+
+            if ld_path:
+                cmd_args.append(ld_path)
+
+            # and the program
+            cmd_args += program_args
+
+            # set up files
+            stdin_file = subprocess.DEVNULL if stdin is None else open(stdin, 'wb') if type(stdin) is str else stdin
+            stdout_file = subprocess.DEVNULL if stdout is None else open(stdout, 'wb') if type(stdout) is str else stdout
+            stderr_file = subprocess.DEVNULL if stderr is None else open(stderr, 'wb') if type(stderr) is str else stderr
+
+            r = { }
+            r['process'] = subprocess.Popen(
+                cmd_args,
+                stdin=stdin_file, stdout=stdout_file, stderr=stderr_file,
+                preexec_fn=self.__get_rlimit_func()
+            )
+
+            try:
+                yield r
+                r['returncode'] = r['process'].wait(timeout=self.trace_timeout)
+                r['timeout'] = False
+
+                # save the trace
+                r['trace'] = ''
+                if record_trace:
+                    with open(trace_filename, 'rb') as tf:
+                        r['trace'] = tf.read()
+
+                # save the magic
+                r['magic'] = ''
+                if record_magic:
+                    with open(magic_filename, 'rb') as tf:
+                        r['magic'] = tf.read()
+
+                # save the core
+                core_glob = glob.glob(os.path.join(tmpdir, "qemu_"+os.path.basename(program_args[0])+"_*.core"))
+                if core_target and core_glob:
+                    shutil.copy(core_glob[0], core_target)
+
+            except subprocess.TimeoutExpired:
+                r['process'].terminate()
+                r['timeout'] = True
+            finally:
+                if isinstance(stdin_file, io.IOBase) and isinstance(stdin, io.IOBase): stdin.close()
+                if isinstance(stdout_file, io.IOBase) and isinstance(stdout, io.IOBase): stdout.close()
+                if isinstance(stderr_file, io.IOBase) and isinstance(stderr, io.IOBase): stderr.close()
+
         return r
 
-    def _run_trace(self, stdout_file=None):
-        logname = tempfile.mktemp(dir="/dev/shm/", prefix="tracer-log-")
-        args = [self._trace_source_path]
+    def _run(self, stdout_file=None):
+        qemu_variant = self._trace_source_path
+        qemu_args = [ ]
 
         if self._bitflip:
-            args.append("-bitflip")
+            qemu_args.append("-bitflip")
 
         if self._seed is not None:
-            args.append("-seed")
-            args.append(str(self._seed))
-
-        # If the binary is CGC we'll also take this opportunity to read in the
-        # magic page.
-        if self._record_magic:
-            mname = tempfile.mktemp(dir="/dev/shm/", prefix="tracer-magic-")
-            args += ["-magicdump", mname]
-        else:
-            mname = None
-
-        if self._record_trace:
-            args += ["-d", "exec", "-D", logname]
-        else:
-            args += ["-enable_double_empty_exiting"]
+            qemu_args.append("-seed")
+            qemu_args.append(str(self._seed))
 
         if self._report_bad_args:
-            args += ["-report_bad_args"]
+            qemu_args += ["-report_bad_args"]
 
         if 'cgc' not in self._trace_source_path:
-            args += ['-E', 'LD_BIND_NOW=1']
+            qemu_args += ['-E', 'LD_BIND_NOW=1']
 
         if self._library_path:
-            args += ['-E', 'LD_LIBRARY_PATH=' + ':'.join(self._library_path)]
+            qemu_args += ['-E', 'LD_LIBRARY_PATH=' + ':'.join(self._library_path)]
 
         # Memory limit option is only available in shellphish-qemu-cgc-*
         if 'cgc' in self._trace_source_path:
-            args += ["-m", self._memory_limit]
+            qemu_args += ["-m", self._memory_limit]
 
-        if self._ld_linux:
-            args.append(self._ld_linux)
+        program_args = self.argv or [self._filename]
+        do_pov = type(self.input) is not bytes
 
-        args += self.argv or [self._binaries[0]]
+        if do_pov:
+            l.debug("Tracing as pov file")
+            in_s, out_s = socket.socketpair()
+        else:
+            in_s = subprocess.PIPE
+            out_s = None
 
-        stdout_f = subprocess.DEVNULL
-        if stdout_file is not None:
-            stdout_f = open(stdout_file, 'wb')
+        with self._tmpfile(prefix='tracer-core-') as core_target:
+            with self._exec_func(
+                qemu_variant, qemu_args, program_args, ld_path=self._ld_linux,
+                stdin=in_s, stdout=stdout_file,
+                record_trace=self._record_trace, record_magic=self._record_magic,
+                core_target=core_target if self._record_core else None
+            ) as exec_details:
+                if do_pov:
+                    for write in self.input.writes:
+                        out_s.send(write)
+                        time.sleep(.01)
+                else:
+                    exec_details['process'].communicate(self.input, timeout=self.trace_timeout)
 
-        p = None
-        try:
-            # we assume qemu with always exit and won't block
-            if type(self.input) is bytes:
-                l.debug("Tracing as raw input")
-                l.debug(" ".join(args))
-                exec_details = self._exec_func(
-                    args,
-                    stdin=subprocess.PIPE, stdout=stdout_f, stderr=subprocess.DEVNULL,
-                )
-                p = exec_details['process']
-                p.communicate(self.input, timeout=self.trace_timeout)
-            else:
-                l.debug("Tracing as pov file")
-                in_s, out_s = socket.socketpair()
-                exec_details = self._exec_func(
-                    args,
-                    stdin=in_s, stdout=stdout_f, stderr=subprocess.DEVNULL,
-                )
-                p = exec_details['process']
-
-                for write in self.input.writes:
-                    out_s.send(write)
-                    time.sleep(.01)
-
-            ret = p.wait(timeout=self.trace_timeout)
+            self.returncode = exec_details['returncode']
+            self.tmout = exec_details['timeout']
 
             # did a crash occur?
-            if ret < 0:
-                if abs(ret) == signal.SIGSEGV or abs(ret) == signal.SIGILL:
-                    l.info("Input caused a crash (signal %d) during dynamic tracing", abs(ret))
+            if self.returncode < 0:
+                if abs(self.returncode) == signal.SIGSEGV or abs(self.returncode) == signal.SIGILL:
+                    l.info("Input caused a crash (signal %d) during dynamic tracing", abs(self.returncode))
                     l.debug(repr(self.input))
                     l.debug("Crash mode is set")
                     self.crash_mode = True
 
-        except subprocess.TimeoutExpired:
-            if p is not None:
-                p.terminate()
-                self.tmout = True
+                if self._record_core:
+                    # find core file
+                    a_mesg = "Empty core file generated"
+                    assert os.path.getsize(core_target) > 0, a_mesg
 
-        self.returncode = p.returncode
-
-        if stdout_file is not None:
-            stdout_f.close()
+                    if self._use_tiny_core:
+                        self._load_tiny_core(core_target)
+                    else:
+                        self._load_core_values(core_target)
 
         if self._record_trace:
             try:
-                trace = open(logname, 'rb').read()
+                trace = exec_details['trace']
                 addrs = []
 
                 # Find where qemu loaded the binary. Primarily for PIE
@@ -388,21 +430,11 @@ class QEMURunner(Runner):
                 l.warning("The trace is found to be malformed. "
                 "it is possible that the log file size exceeds the 1G limit, "
                 "meaning that there might be infinite loops in the target program.")
-            finally:
-                os.remove(logname)
 
-        if mname is not None:  # if self._record_magic:
-            try:
-                self.magic = open(mname, 'rb').read()
-                a_mesg = "Magic content read from QEMU improper size, should be a page in length"
-                assert len(self.magic) == 0x1000, a_mesg
-            except IOError:
-                pass
-            finally:
-                try:
-                    os.remove(mname)
-                except OSError:
-                    pass
+        if self._record_magic:
+            self.magic = exec_details['magic']
+            a_mesg = "Magic content read from QEMU improper size, should be a page in length"
+            assert len(self.magic) == 0x1000, a_mesg
 
     def _load_core_values(self, core_file):
         p = angr.Project(core_file)
