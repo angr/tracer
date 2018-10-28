@@ -10,7 +10,6 @@ import time
 import glob
 import os
 import re
-import io
 
 l = logging.getLogger("tracer.qemu_runner")
 
@@ -241,8 +240,8 @@ class QEMURunner:
             yield tmpdir
         finally:
             os.chdir(curdir)
-            try: shutil.rmtree(tmpdir)
-            except FileNotFoundError: pass
+            with contextlib.suppress(FileNotFoundError):
+                 shutil.rmtree(tmpdir)
 
     @staticmethod
     @contextlib.contextmanager
@@ -251,14 +250,14 @@ class QEMURunner:
         try:
             yield tmpfile
         finally:
-            try: os.unlink(tmpfile)
-            except FileNotFoundError: pass
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(tmpfile)
 
     @contextlib.contextmanager
     def _exec_func(self, qemu_variant, qemu_args, program_args, ld_path=None, stdin=None, stdout=None, stderr=None, record_trace=True, record_magic=False, core_target=None): #pylint:disable=method-hidden
         #pylint:disable=subprocess-popen-preexec-fn
 
-        with self._cd_tmpdir() as tmpdir, self._tmpfile(dir="/dev/shm/", prefix="tracer-log-") as trace_filename, self._tmpfile(dir="/dev/shm/", prefix="tracer-magic-") as magic_filename:
+        with self._cd_tmpdir() as tmpdir, self._tmpfile(dir="/dev/shm/", prefix="tracer-log-") as trace_filename, self._tmpfile(dir="/dev/shm/", prefix="tracer-magic-") as magic_filename, contextlib.ExitStack() as exit_stack:
             cmd_args = [ qemu_variant ]
             cmd_args += qemu_args
 
@@ -287,9 +286,9 @@ class QEMURunner:
             cmd_args += program_args
 
             # set up files
-            stdin_file = subprocess.DEVNULL if stdin is None else open(stdin, 'wb') if type(stdin) is str else stdin
-            stdout_file = subprocess.DEVNULL if stdout is None else open(stdout, 'wb') if type(stdout) is str else stdout
-            stderr_file = subprocess.DEVNULL if stderr is None else open(stderr, 'wb') if type(stderr) is str else stderr
+            stdin_file = subprocess.DEVNULL if stdin is None else exit_stack.enter_context(open(stdin, 'wb')) if type(stdin) is str else stdin
+            stdout_file = subprocess.DEVNULL if stdout is None else exit_stack.enter_context(open(stdout, 'wb')) if type(stdout) is str else stdout
+            stderr_file = subprocess.DEVNULL if stderr is None else exit_stack.enter_context(open(stderr, 'wb')) if type(stderr) is str else stderr
 
             r = { }
             r['process'] = subprocess.Popen(
@@ -319,14 +318,9 @@ class QEMURunner:
                 core_glob = glob.glob(os.path.join(tmpdir, "qemu_"+os.path.basename(program_args[0])+"_*.core"))
                 if core_target and core_glob:
                     shutil.copy(core_glob[0], core_target)
-
             except subprocess.TimeoutExpired:
                 r['process'].terminate()
                 r['timeout'] = True
-            finally:
-                if isinstance(stdin_file, io.IOBase) and isinstance(stdin, io.IOBase): stdin.close()
-                if isinstance(stdout_file, io.IOBase) and isinstance(stdout, io.IOBase): stdout.close()
-                if isinstance(stderr_file, io.IOBase) and isinstance(stderr, io.IOBase): stderr.close()
 
         return r
 
