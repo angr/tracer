@@ -320,6 +320,11 @@ class QEMURunner:
                     shutil.copy(core_glob[0], core_target)
             except subprocess.TimeoutExpired:
                 r['process'].terminate()
+                r['returncode'] = r['process'].wait()
+                if record_trace and 'trace' not in r:
+                    r['trace'] = b''
+                if record_magic and 'magic' not in r:
+                    r['magic'] = b''
                 r['timeout'] = True
 
         return r
