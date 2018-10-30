@@ -156,7 +156,7 @@ class QEMURunner:
             self._exec_func = exec_func
 
         if record_stdout:
-            tmp = tempfile.mktemp(prefix="stdout_" + os.path.basename(self._p.filename))
+            tmp = tempfile.mkstemp(prefix="stdout_" + os.path.basename(self._p.filename))[1]
             # will set crash_mode correctly
             self._run(stdout_file=tmp)
             with open(tmp, "rb") as f:
@@ -246,7 +246,7 @@ class QEMURunner:
     @staticmethod
     @contextlib.contextmanager
     def _tmpfile(**kwargs):
-        tmpfile = tempfile.mktemp(**kwargs)
+        tmpfile = tempfile.mkstemp(**kwargs)[1]
         try:
             yield tmpfile
         finally:
@@ -266,7 +266,7 @@ class QEMURunner:
 
             # record the trace, if we want to
             if record_trace:
-                trace_filename = tempfile.mktemp(dir="/dev/shm/", prefix="tracer-log-")
+                trace_filename = tempfile.mkstemp(dir="/dev/shm/", prefix="tracer-log-")[1]
                 cmd_args += ["-d", "exec", "-D", trace_filename]
             else:
                 trace_filename = None
@@ -274,7 +274,7 @@ class QEMURunner:
 
             # If the binary is CGC we'll also take this opportunity to read in the magic page.
             if record_magic:
-                magic_filename = tempfile.mktemp(dir="/dev/shm/", prefix="tracer-magic-")
+                magic_filename = tempfile.mkstemp(dir="/dev/shm/", prefix="tracer-magic-")[1]
                 cmd_args += ["-magicdump", magic_filename]
             else:
                 magic_filename = None
