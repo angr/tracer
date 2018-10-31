@@ -232,19 +232,6 @@ class QEMURunner:
 
     @staticmethod
     @contextlib.contextmanager
-    def _cd_tmpdir():
-        curdir = os.getcwd()
-        tmpdir = tempfile.mkdtemp(prefix="/tmp/tracer_")
-        try:
-            os.chdir(tmpdir)
-            yield tmpdir
-        finally:
-            os.chdir(curdir)
-            with contextlib.suppress(FileNotFoundError):
-                 shutil.rmtree(tmpdir)
-
-    @staticmethod
-    @contextlib.contextmanager
     def _tmpfile(**kwargs):
         tmpfile = tempfile.mkstemp(**kwargs)[1]
         try:
@@ -257,7 +244,7 @@ class QEMURunner:
     def _exec_func(self, qemu_variant, qemu_args, program_args, ld_path=None, stdin=None, stdout=None, stderr=None, record_trace=True, record_magic=False, core_target=None): #pylint:disable=method-hidden
         #pylint:disable=subprocess-popen-preexec-fn
 
-        with self._cd_tmpdir() as tmpdir, self._tmpfile(dir="/dev/shm/", prefix="tracer-log-") as trace_filename, self._tmpfile(dir="/dev/shm/", prefix="tracer-magic-") as magic_filename, contextlib.ExitStack() as exit_stack:
+        with self._tmpfile(dir="/dev/shm/", prefix="tracer-log-") as trace_filename, self._tmpfile(dir="/dev/shm/", prefix="tracer-magic-") as magic_filename, contextlib.ExitStack() as exit_stack:
             cmd_args = [ qemu_variant ]
             cmd_args += qemu_args
 
@@ -314,10 +301,12 @@ class QEMURunner:
                     with open(magic_filename, 'rb') as tf:
                         r['magic'] = tf.read()
 
-                # save the core
-                core_glob = glob.glob(os.path.join(tmpdir, "qemu_"+os.path.basename(program_args[0])+"_*.core"))
+                # save the core and clean up the original core
+                core_glob = glob.glob("/tmp/qemu_"+os.path.basename(program_args[0])+"_*.core")
                 if core_target and core_glob:
                     shutil.copy(core_glob[0], core_target)
+                if core_glob:
+                    os.unlink(core_glob[0])
             except subprocess.TimeoutExpired:
                 r['process'].terminate()
                 r['returncode'] = r['process'].wait()
