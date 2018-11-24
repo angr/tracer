@@ -27,6 +27,10 @@ def test_runner():
     r = QEMURunner(binary=os.path.join(bin_location, "tests/i386/call_symbolic"), input=b"A" * 700)
     nose.tools.assert_equal(r.crash_mode, True)
 
+    r = QEMURunner(binary=os.path.join(bin_location, "tests/i386/vuln_stacksmash"), input=b"A" * 700)
+    assert len(r.trace) > 100
+    assert r.crash_mode
+
     r = QEMURunner(binary=os.path.join(bin_location, "tests/cgc/CROMU_00071"),
                    input=bytes.fromhex("0c0c492a53acacacacacacacacacacacacac000100800a0b690e0aef6503697d660a0059e20afc0a0a332f7d66660a0059e20afc0a0a332f7fffffff16fb1616162516161616161616166a7dffffff7b0e0a0a6603697d660a0059e21c"))
     nose.tools.assert_equal(r.crash_mode, True)

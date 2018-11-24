@@ -268,7 +268,10 @@ class QEMURunner:
             if record_trace:
                 fd, trace_filename = tempfile.mkstemp(dir="/dev/shm/", prefix="tracer-log-")
                 os.close(fd)
-                cmd_args += ["-d", "exec", "-D", trace_filename]
+                if 'cgc' in qemu_variant:
+                    cmd_args += ["-d", "exec", "-D", trace_filename]
+                else:
+                    cmd_args += ["-d", "exec,nochain,page", "-D", trace_filename]
             else:
                 trace_filename = None
                 cmd_args += ["-enable_double_empty_exiting"]
@@ -415,7 +418,8 @@ class QEMURunner:
                     self.base_addr = qemu_base_addr
                     self.rebase = True
 
-                prog = re.compile(br'Trace (.*) \[(?P<addr>.*)\].*')
+                print(qemu_variant)
+                prog = re.compile(br'Trace (.*) \[(?P<addr>.*)\].*' if 'cgc' in qemu_variant else br'Trace (.*) \[(?P<something1>.*)\/(?P<addr>.*)\/(?P<flags>.*)\].*')
                 for t in trace.split(b'\n'):
                     m = prog.match(t)
                     if m is not None:
@@ -426,7 +430,7 @@ class QEMURunner:
 
                 # grab the faulting address
                 if self.crash_mode:
-                    self.crash_addr = int(trace.split(b'\n')[-2].split(b'[')[1].split(b']')[0], 16)
+                    self.crash_addr = addrs[-1]
 
 
                 self.trace = addrs
