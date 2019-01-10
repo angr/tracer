@@ -426,7 +426,13 @@ class QEMURunner:
 
                 # grab the faulting address
                 if self.crash_mode:
-                    self.crash_addr = int(trace.split(b'\n')[-2].split(b'[')[1].split(b']')[0], 16)
+                    lastline = trace.split(b'\n')[-2]
+                    if lastline.startswith(b"Trace") or lastline.find(b"Segmentation") == -1:
+                        l.warning("Trace return code was less than zero, but the last line of the trace does not"
+                                  "contain the uncaught exception error from qemu."
+                                  "If using an older version of shellphish_qemu try using 'ulimit -Sc 0' or "
+                                  "updating to a newer version of shellphish_qemu.")
+                    self.crash_addr = int(lastline.split(b'[')[1].split(b']')[0], 16)
 
 
                 self.trace = addrs
