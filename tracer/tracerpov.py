@@ -55,7 +55,7 @@ class TracerPoV(object):
             if d is None:
                 raise ValueError("could not find data tag inside write element, unsupport element")
 
-            body = ''
+            body = b''
             for i in d:
                 mode_i = i.attrib.get('format', mode)
                 if i.tag == 'data':
@@ -63,9 +63,9 @@ class TracerPoV(object):
                 else:
                     text = self._variables[i.text]
                 if mode_i == 'ascii':
-                    body += text.decode('string-escape')
+                    body += text.encode('utf-8').decode('unicode_escape').encode('utf-8')
                 elif mode_i == 'hex':
-                    body += text.strip().replace('\n', '').decode('hex')
+                    body += bytes.fromhex(text.strip().replace('\n', ''))
                 else:
                     raise ValueError("unrecognized mode '%s' in file '%s'" % (mode_i, self.filename))
             self.writes.append(body)
