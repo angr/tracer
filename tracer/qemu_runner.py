@@ -137,7 +137,7 @@ class QEMURunner:
             except ValueError:
                 raise ValueError("The passed seed is either not an integer or is not between 0 and UINT_MAX")
 
-        self.input_max_size = max_size or len(input) if input is not None else None
+        self.input_max_size = max_size or len(input) if type(input) is bytes else None
 
         self.trace_log_limit = trace_log_limit
         self.trace_timeout = trace_timeout
