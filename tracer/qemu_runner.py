@@ -39,7 +39,7 @@ class QEMURunner:
         """
         :param argv             : Optionally specify argv params (i,e,: ['./calc', 'parm1']).
         :param binary        : Path to the binary to be traced.
-        :param input         : Concrete input to feed to binary (string or CGC TracerPoV).
+        :param input         : Concrete input to feed to binary (bytes or CGC TracerPoV).
         :param project       : The original project.
         :param record_trace  : Whether or not to record the basic block trace.
         :param record_stdout : Whether ot not to record the output of tracing process.
@@ -137,7 +137,7 @@ class QEMURunner:
             except ValueError:
                 raise ValueError("The passed seed is either not an integer or is not between 0 and UINT_MAX")
 
-        self.input_max_size = max_size or len(input) if input is not None else None
+        self.input_max_size = max_size or len(input) if type(input) is bytes else None
 
         self.trace_log_limit = trace_log_limit
         self.trace_timeout = trace_timeout
