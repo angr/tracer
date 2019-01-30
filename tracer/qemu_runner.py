@@ -418,7 +418,6 @@ class QEMURunner:
                     self.base_addr = qemu_base_addr
                     self.rebase = True
 
-                print(qemu_variant)
                 prog = re.compile(br'Trace (.*) \[(?P<addr>.*)\].*' if 'cgc' in qemu_variant else br'Trace (.*) \[(?P<something1>.*)\/(?P<addr>.*)\/(?P<flags>.*)\].*')
                 for t in trace.split(b'\n'):
                     m = prog.match(t)
