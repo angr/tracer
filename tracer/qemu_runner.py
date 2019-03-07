@@ -245,11 +245,11 @@ class QEMURunner:
     @contextlib.contextmanager
     def _tmpfile(**kwargs):
         fd, tmpfile = tempfile.mkstemp(**kwargs)
+        os.close(fd)
         try:
             yield tmpfile
         finally:
             with contextlib.suppress(FileNotFoundError):
-                os.close(fd)
                 os.unlink(tmpfile)
 
     @contextlib.contextmanager
@@ -266,8 +266,6 @@ class QEMURunner:
 
             # record the trace, if we want to
             if record_trace:
-                fd, trace_filename = tempfile.mkstemp(dir="/dev/shm/", prefix="tracer-log-")
-                os.close(fd)
                 if 'cgc' in qemu_variant:
                     cmd_args += ["-d", "exec", "-D", trace_filename]
                 else:
@@ -278,8 +276,6 @@ class QEMURunner:
 
             # If the binary is CGC we'll also take this opportunity to read in the magic page.
             if record_magic:
-                fd, magic_filename = tempfile.mkstemp(dir="/dev/shm/", prefix="tracer-magic-")
-                os.close(fd)
                 cmd_args += ["-magicdump", magic_filename]
             else:
                 magic_filename = None
