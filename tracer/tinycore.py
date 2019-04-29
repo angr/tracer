@@ -44,6 +44,9 @@ class TinyCore:
         'e_machine': {32: (0x12, 2), 64: (0x12, 2)},
         'e_phoff': {32: (0x1c, 4), 64: (0x20, 8)},
         'e_phnum': {32: (0x2c, 2), 64: (0x38, 2)},
+        # offsets and sizes of fields in Program Header
+        'p_offset': {32: (4, 4), 64: (8, 8)},
+        'p_filesz': {32: (0x10, 4), 64: (0x20, 8)},
     }
 
     def __init__(self, filename):
@@ -97,6 +100,11 @@ class TinyCore:
 
     @staticmethod
     def _read_word(stream, size):
+        return TinyCore._parse_word(stream.read(size))
+
+    @staticmethod
+    def _parse_word(data):
+        size = len(data)
         if size == 1:
             format_specifier = "B"
         elif size == 2:
@@ -107,7 +115,7 @@ class TinyCore:
             format_specifier = "<Q"
         else:
             raise TypeError('Unsupported word size %s.' % size)
-        return struct.unpack(format_specifier, stream.read(size))[0]
+        return struct.unpack(format_specifier, data)[0]
 
     def parse(self):
         with open(self.filename, "rb") as f:
@@ -134,26 +142,28 @@ class TinyCore:
             self.ph_num = self._read_word(f, self.ELF_FIELDS['e_phnum'][self.bits][1])
 
             f.seek(self.ph_off)
-            # TODO: Support 64-bit core files (e.g., ph_header size is 0x38 in 64-bit core files)
-            if self.bits == 64:
-                raise TypeError("TinyCore does not yet support loading program header table in 64-bit core files.")
-            ph_headers = f.read(self.ph_num*0x20)
+
+            ph_header_sizes = { 32: 0x20, 64: 0x38 }
+
+            ph_headers = f.read(self.ph_num*ph_header_sizes[self.bits])
 
             for i in range(self.ph_num):
-                off = i*0x20
+                off = i*ph_header_sizes[self.bits]
                 p_type_packed = ph_headers[off:off+4]
                 # be careful
                 if len(p_type_packed) != 4:
                     continue
                 p_type = struct.unpack("<I", p_type_packed)[0]
                 if p_type == 4:  # note
-                    note_offset_packed = ph_headers[off+4:off+8]
-                    note_size_packed = ph_headers[off+16:off+20]
+                    p_offset_off, p_offset_size = self.ELF_FIELDS['p_offset'][self.bits]
+                    p_filesz_off, p_filesz_size = self.ELF_FIELDS['p_filesz'][self.bits]
+                    note_offset_packed = ph_headers[off + p_offset_off : off + p_offset_off + p_offset_size]
+                    note_size_packed = ph_headers[off + p_filesz_off : off + p_filesz_off + p_filesz_size]
                     # be careful
-                    if len(note_offset_packed) != 4 or len(note_size_packed) != 4:
+                    if len(note_offset_packed) != p_offset_size or len(note_size_packed) != p_filesz_size:
                         continue
-                    note_offset = struct.unpack("<I", note_offset_packed)[0]
-                    note_size = struct.unpack("<I", note_size_packed)[0]
+                    note_offset = self._parse_word(note_offset_packed)
+                    note_size = self._parse_word(note_size_packed)
                     if note_size > 0x100000:
                         l.warning("note size > 0x100000")
                         note_size = 0x100000
@@ -253,6 +263,13 @@ class TinyCore:
         if self.arch == "x86":
             rnames = ['ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp', 'eax', 'ds', 'es', 'fs', 'gs', 'xxx', 'eip',
                       'cs', 'eflags', 'esp', 'ss']
+            nreg = len(rnames)
+        elif self.arch == "x86-64":
+            rnames = ['r15', 'r14', 'r13', 'r12', 'rbp', 'rbx', 'r11', 'r10',
+                      'r9', 'r8', 'rax', 'rcx', 'rdx', 'rsi', 'rdi', 'orig_rax',
+                      'rip', 'cs', 'eflags', 'rsp', 'ss',
+                      'fs_base', 'gs_base', 'ds', 'es', 'fs', 'gs',
+                      ]
             nreg = len(rnames)
         elif self.arch == "mips":
             pos += arch_bytes * 6  # 6 wors of padding
