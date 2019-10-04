@@ -77,7 +77,7 @@ class Tracer(object):
                     add_options=add_options,
                     remove_options=remove_options)
             if preconstrain_input:
-                s.preconstrainer.preconstrain_file(input, s.posix.stdin, True)
+                s.preconstrainer.preconstrain_file(s.posix.stdin, input, True)
             #if preconstrain_flag:
             #    s.preconstrainer.preconstrain_flag_page(self.r.magic)
 
@@ -92,7 +92,7 @@ class Tracer(object):
                     remove_options=remove_options,
                     chroot=chroot, args=argv)
             if preconstrain_input:
-                s.preconstrainer.preconstrain_file(input, s.posix.stdin, True)
+                s.preconstrainer.preconstrain_file(s.posix.stdin, input, True)
         else:
             raise ValueError("Can't trace binary for operating system %s" % p.loader.main_object.os)
 
