@@ -448,7 +448,7 @@ class QEMURunner:
 
     def _load_core_values(self, core_file):
         p = angr.Project(core_file)
-        self.reg_vals = {reg:val for (reg, val) in p.loader.main_object.initial_register_values()}
+        self.reg_vals = p.loader.main_object.thread_registers()
         self._state = p.factory.entry_state()
         self.memory = self._state.memory
 
