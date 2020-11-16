@@ -263,16 +263,14 @@ class TinyCore:
         if self.arch == "x86":
             rnames = ['ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp', 'eax', 'ds', 'es', 'fs', 'gs', 'xxx', 'eip',
                       'cs', 'eflags', 'esp', 'ss']
-            nreg = len(rnames)
         elif self.arch == "x86-64":
             rnames = ['r15', 'r14', 'r13', 'r12', 'rbp', 'rbx', 'r11', 'r10',
                       'r9', 'r8', 'rax', 'rcx', 'rdx', 'rsi', 'rdi', 'orig_rax',
                       'rip', 'cs', 'eflags', 'rsp', 'ss',
                       'fs_base', 'gs_base', 'ds', 'es', 'fs', 'gs',
                       ]
-            nreg = len(rnames)
         elif self.arch == "mips":
-            pos += arch_bytes * 6  # 6 wors of padding
+            pos += arch_bytes * 6  # 6 words of padding
             rnames = ['zero', 'at', 'v0', 'v1',
                       'a0', 'a1', 'a2', 'a3',
                       't0', 't1', 't2', 't3', 't4', 't5', 't6', 't7',
@@ -280,9 +278,13 @@ class TinyCore:
                       't8', 't9', 'k0', 'k1', 'gp', 'sp', 's8', 'ra',
                       'lo', 'hi', 'pc',
                       ]
-            nreg = len(rnames)
+        elif self.arch == "arm":
+            rnames = ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9',
+                      'r10', 'fp', 'r12', 'sp', 'lr', 'pc', 'cpsr'] # r10 is also known as sl, r12 as ip
         else:
             raise ValueError("Architecture %s is currently unsupported." % self.arch)
+
+        nreg = len(rnames)
 
         regvals = []
         for idx in range(pos, pos + nreg * arch_bytes, arch_bytes):
