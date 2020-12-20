@@ -62,7 +62,7 @@ class TracerPoV(object):
                     text = i.text
                 else:
                     text = self._variables[i.text]
-                if mode_i == 'ascii':
+                if mode_i == 'ascii' or mode_i == 'asciic':
                     body += text.encode('utf-8').decode('unicode_escape').encode('latin-1')
                 elif mode_i == 'hex':
                     body += bytes.fromhex(text.strip().replace('\n', ''))
