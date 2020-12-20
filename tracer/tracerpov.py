@@ -15,12 +15,27 @@ class TracerPoV(object):
         self._raw_writes = self._root.find('replay').findall('write')
 
         self._raw_reads = self._root.find('replay').findall('read')
+        self._variable_declarations = self._root.find('replay').findall('decl')
         self._collect_variables()
         self._clean_writes()
         self.stdin = self._prepare_dialogue()
 
     def _collect_variables(self):
         self._variables = dict()
+        for variable_declaration in self._variable_declarations:
+            variable_name = None
+            variable_value = ""
+            for ele in variable_declaration.getchildren():
+                if ele.tag == 'var':
+                    variable_name = ele.text
+                elif ele.tag == 'value':
+                    variable_data = ele.getchildren()[0]
+                    assert(variable_data.tag == 'data')
+                    variable_value = variable_data.text
+
+            if variable_name:
+                self._variables[variable_name] = variable_value
+
         for raw_read in self._raw_reads:
             for ele in raw_read.getchildren():
                 if ele.tag == 'delim':
