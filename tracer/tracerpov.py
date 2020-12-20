@@ -47,8 +47,8 @@ class TracerPoV(object):
                     if not ele.find('slice') is None:
                         begin = ele.find('slice').attrib.get('begin')
                         end = ele.find('slice').attrib.get('end')
-                        if not begin is None: begin = ord(begin) - ord('0')
-                        if not end is None: end = ord(end) - ord('0')
+                        if not begin is None: begin = int(begin)
+                        if not end is None: end = int(end)
                     else:
                         begin = None
                         end = None
