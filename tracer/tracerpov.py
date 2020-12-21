@@ -37,6 +37,7 @@ class TracerPoV(object):
                 self._variables[variable_name] = variable_value
 
         for raw_read in self._raw_reads:
+            current_var = ""
             for ele in raw_read.getchildren():
                 if ele.tag == 'delim':
                     current_var = ele.text
