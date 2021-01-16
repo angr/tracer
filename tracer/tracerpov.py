@@ -25,11 +25,11 @@ class TracerPoV(object):
         for variable_declaration in self._variable_declarations:
             variable_name = None
             variable_value = ""
-            for ele in variable_declaration.getchildren():
+            for ele in variable_declaration:
                 if ele.tag == 'var':
                     variable_name = ele.text
                 elif ele.tag == 'value':
-                    variable_data = ele.getchildren()[0]
+                    variable_data = list(ele)[0]
                     assert(variable_data.tag == 'data')
                     variable_value = variable_data.text
 
@@ -38,7 +38,7 @@ class TracerPoV(object):
 
         for raw_read in self._raw_reads:
             current_var = ""
-            for ele in raw_read.getchildren():
+            for ele in raw_read:
                 if ele.tag == 'delim':
                     current_var = ele.text
                 elif ele.tag == 'data':
@@ -72,7 +72,7 @@ class TracerPoV(object):
                 mode = raw_write.attrib['format']
             d = filter(lambda ele:
                     ele.tag == 'data' or ele.tag == 'var',
-                    raw_write.getchildren())
+                    raw_write)
             if d is None:
                 raise ValueError("could not find data tag inside write element, unsupport element")
 
