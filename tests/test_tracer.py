@@ -32,7 +32,7 @@ def test_cgc_se1_palindrome_raw():
     nose.tools.assert_false(b"Nope" in stdout_dump)
 
     # now test crashing input
-    t = tracer.Tracer(os.path.join(bin_location, "tests/cgc/sc1_0b32aa01_01"), b"A" * 129)
+    t = tracer.Tracer(os.path.join(bin_location, "tests/cgc/sc1_0b32aa01_01"), b"B" * 129)
     result_state, crash_state = t.run()
 
     nose.tools.assert_not_equal(result_state, None)
