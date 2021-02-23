@@ -41,6 +41,7 @@ class TinyCore:
 
     ELF_FIELDS = {
         'e_ident[EI_CLASS]': {32: (4, 1), 64: (4, 1)},
+        'e_ident[EI_DATA]': {32: (5, 1), 64: (5, 1)},
         'e_machine': {32: (0x12, 2), 64: (0x12, 2)},
         'e_phoff': {32: (0x1c, 4), 64: (0x20, 8)},
         'e_phnum': {32: (0x2c, 2), 64: (0x38, 2)},
@@ -50,7 +51,7 @@ class TinyCore:
     }
 
     def __init__(self, filename):
-
+        self.endian_format = "<"
         self.bits = None
         self.arch = None
 
@@ -98,37 +99,45 @@ class TinyCore:
         else:
             raise ValueError("Unsupported machine type %d." % machine)
 
-    @staticmethod
-    def _read_word(stream, size):
-        return TinyCore._parse_word(stream.read(size))
+    def _read_word(self, stream, size):
+        return self._parse_word(stream.read(size))
 
-    @staticmethod
-    def _parse_word(data):
+    def _parse_word(self, data):
         size = len(data)
         if size == 1:
             format_specifier = "B"
         elif size == 2:
-            format_specifier = "<H"
+            format_specifier = "H"
         elif size == 4:
-            format_specifier = "<I"
+            format_specifier = "I"
         elif size == 8:
-            format_specifier = "<Q"
+            format_specifier = "Q"
         else:
             raise TypeError('Unsupported word size %s.' % size)
-        return struct.unpack(format_specifier, data)[0]
+        return struct.unpack(self.endian_format + format_specifier, data)[0]
 
     def parse(self):
         with open(self.filename, "rb") as f:
             # bits
-            ei_class = self.ELF_FIELDS['e_ident[EI_CLASS]'][32]
-            f.seek(ei_class[0])
-            ei_class_field = self._read_word(f, ei_class[1])
+            ei_class_off, ei_class_size = self.ELF_FIELDS['e_ident[EI_CLASS]'][32]
+            f.seek(ei_class_off)
+            ei_class_field = self._read_word(f, ei_class_size)
             if ei_class_field == 1:
                 self.bits = 32
             elif ei_class_field == 2:
                 self.bits = 64
             else:
                 raise IOError("Cannot determine the bits of the core file. Are you sure the core file is correct?")
+
+            ei_data_off, ei_data_size = self.ELF_FIELDS['e_ident[EI_DATA]'][32]
+            f.seek(ei_data_off)
+            ei_data_field = self._read_word(f, ei_data_size)
+            if ei_data_field == 1:
+                self.endian_format = "<"
+            elif ei_data_field == 2:
+                self.endian_format = ">"
+            else:
+                raise IOError("Cannot determine the endianness of the core file. Are you sure the core file is correct?")
 
             # architecture
             f.seek(self.ELF_FIELDS['e_machine'][self.bits][0])
@@ -153,7 +162,7 @@ class TinyCore:
                 # be careful
                 if len(p_type_packed) != 4:
                     continue
-                p_type = struct.unpack("<I", p_type_packed)[0]
+                p_type = struct.unpack(self.endian_format + "I", p_type_packed)[0]
                 if p_type == 4:  # note
                     p_offset_off, p_offset_size = self.ELF_FIELDS['p_offset'][self.bits]
                     p_filesz_off, p_filesz_size = self.ELF_FIELDS['p_filesz'][self.bits]
@@ -186,7 +195,7 @@ class TinyCore:
             to_unpack = blob[note_pos:note_pos+12]
             if len(to_unpack) != 12:
                 break
-            name_sz, desc_sz, n_type = struct.unpack("<3I", to_unpack)
+            name_sz, desc_sz, n_type = struct.unpack(self.endian_format + "3I", to_unpack)
             name_sz_rounded = (((name_sz + (4 - 1)) // 4) * 4)
             desc_sz_rounded = (((desc_sz + (4 - 1)) // 4) * 4)
             # description size + the rounded name size + header size
@@ -221,10 +230,10 @@ class TinyCore:
         """
 
         # extract siginfo from prstatus
-        self.si_signo, self.si_code, self.si_errno = struct.unpack("<3I", prstatus.desc[:12])
+        self.si_signo, self.si_code, self.si_errno = struct.unpack(self.endian_format+"3I", prstatus.desc[:12])
 
         # this field is a short, but it's padded to an int
-        self.pr_cursig = struct.unpack("<I", prstatus.desc[12:16])[0]
+        self.pr_cursig = struct.unpack(self.endian_format+"I", prstatus.desc[12:16])[0]
 
         arch_bytes = self.bits // 8
         # TODO: Does endianness matter?
@@ -235,27 +244,27 @@ class TinyCore:
         else:
             raise ParseError("Architecture must have a bitwidth of either 64 or 32")
 
-        self.pr_sigpend, self.pr_sighold = struct.unpack("<" + (fmt * 2), prstatus.desc[16:16 + (2 * arch_bytes)])
+        self.pr_sigpend, self.pr_sighold = struct.unpack(self.endian_format + (fmt * 2), prstatus.desc[16:16 + (2 * arch_bytes)])
 
-        attrs = struct.unpack("<IIII", prstatus.desc[16 + (2 * arch_bytes):16 + (2 * arch_bytes) + (4 * 4)])
+        attrs = struct.unpack(self.endian_format + "IIII", prstatus.desc[16 + (2 * arch_bytes):16 + (2 * arch_bytes) + (4 * 4)])
         self.pr_pid, self.pr_ppid, self.pr_pgrp, self.pr_sid = attrs
 
         # parse out the 4 timevals
         pos = 16 + (2 * arch_bytes) + (4 * 4)
-        usec = struct.unpack("<" + fmt, prstatus.desc[pos:pos + arch_bytes])[0] * 1000
-        self.pr_utime_usec = struct.unpack("<" + fmt, prstatus.desc[pos + arch_bytes:pos + arch_bytes * 2])[0] + usec
+        usec = struct.unpack(self.endian_format + fmt, prstatus.desc[pos:pos + arch_bytes])[0] * 1000
+        self.pr_utime_usec = struct.unpack(self.endian_format + fmt, prstatus.desc[pos + arch_bytes:pos + arch_bytes * 2])[0] + usec
 
         pos += arch_bytes * 2
-        usec = struct.unpack("<" + fmt, prstatus.desc[pos:pos + arch_bytes])[0] * 1000
-        self.pr_stime_usec = struct.unpack("<" + fmt, prstatus.desc[pos + arch_bytes:pos + arch_bytes * 2])[0] + usec
+        usec = struct.unpack(self.endian_format + fmt, prstatus.desc[pos:pos + arch_bytes])[0] * 1000
+        self.pr_stime_usec = struct.unpack(self.endian_format + fmt, prstatus.desc[pos + arch_bytes:pos + arch_bytes * 2])[0] + usec
 
         pos += arch_bytes * 2
-        usec = struct.unpack("<" + fmt, prstatus.desc[pos:pos + arch_bytes])[0] * 1000
-        self.pr_cutime_usec = struct.unpack("<" + fmt, prstatus.desc[pos + arch_bytes:pos + arch_bytes * 2])[0] + usec
+        usec = struct.unpack(self.endian_format + fmt, prstatus.desc[pos:pos + arch_bytes])[0] * 1000
+        self.pr_cutime_usec = struct.unpack(self.endian_format + fmt, prstatus.desc[pos + arch_bytes:pos + arch_bytes * 2])[0] + usec
 
         pos += arch_bytes * 2
-        usec = struct.unpack("<" + fmt, prstatus.desc[pos:pos + arch_bytes])[0] * 1000
-        self.pr_cstime_usec = struct.unpack("<" + fmt, prstatus.desc[pos + arch_bytes:pos + arch_bytes * 2])[0] + usec
+        usec = struct.unpack(self.endian_format + fmt, prstatus.desc[pos:pos + arch_bytes])[0] * 1000
+        self.pr_cstime_usec = struct.unpack(self.endian_format + fmt, prstatus.desc[pos + arch_bytes:pos + arch_bytes * 2])[0] + usec
 
         pos += arch_bytes * 2
 
@@ -288,12 +297,12 @@ class TinyCore:
 
         regvals = []
         for idx in range(pos, pos + nreg * arch_bytes, arch_bytes):
-            regvals.append(struct.unpack("<" + fmt, prstatus.desc[idx:idx + arch_bytes])[0])
+            regvals.append(struct.unpack(self.endian_format + fmt, prstatus.desc[idx:idx + arch_bytes])[0])
         self.registers = dict(zip(rnames, regvals))
 
         self.registers.pop('xxx', None)
 
         pos += nreg * arch_bytes
-        self.pr_fpvalid = struct.unpack("<I", prstatus.desc[pos:pos + 4])[0]
+        self.pr_fpvalid = struct.unpack(self.endian_format + "I", prstatus.desc[pos:pos + 4])[0]
         return True
 
