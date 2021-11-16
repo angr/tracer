@@ -17,7 +17,7 @@ def test_runner():
     nose.tools.assert_equal(r.crash_mode, True)
 
     binary_path = os.path.join(bin_location, "tests/cgc/CROMU_00070")
-    p = angr.Project(binary_path)
+    p = angr.Project(binary_path, auto_load_libs=False)
     r = QEMURunner(project=p, input=b"hello")
     nose.tools.assert_equal(r.crash_mode, False)
 
