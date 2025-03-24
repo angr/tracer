@@ -65,7 +65,8 @@ class Tracer(object):
             l.debug("Hooking %#x -> %s...", addr, proc.display_name)
 
         if p.loader.main_object.os == 'cgc':
-            p.simos.syscall_library.update(angr.SIM_LIBRARIES['cgcabi_tracer'])
+            simlib = angr.SIM_LIBRARIES['cgcabi_tracer']
+            p.simos.syscall_library.update(simlib[0] if isinstance(simlib, list) else simlib)
 
             for symbol in simprocedures:
                 angr.SIM_LIBRARIES['cgcabi'].add(symbol, simprocedures[symbol])
